@@ -1,0 +1,40 @@
+# === Data (lives on Google Drive, not in Git) ===
+data/
+models/
+logs/
+
+# === Media files (safety net) ===
+*.pth
+*.pt
+*.h5
+*.onnx
+*.mp4
+*.avi
+*.mov
+*.jpg
+*.png
+*.jpeg
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# === Credentials & Secrets ===
+.env
+*.log
+kaggle.json
+*.key
+*.secret
+
+# === OS Files ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
