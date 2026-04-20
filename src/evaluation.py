@@ -4,6 +4,7 @@ All functions return plain dicts that can be serialized straight to JSON.
 """
 from __future__ import annotations
 
+import warnings
 from typing import Iterable
 
 import numpy as np
@@ -25,8 +26,8 @@ def evaluate(
     device: torch.device,
 ) -> dict:
     """Full evaluation pass. Returns accuracy, precision, recall, f1, auc + raw arrays."""
-    model.eval()
     model.to(device)
+    model.eval()
     y_true, y_pred, y_probs = [], [], []
     total_loss = 0.0
     n_batches = 0
@@ -34,6 +35,10 @@ def evaluate(
         frames = frames.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
         logits = model(frames)
+        if logits.ndim != 2 or logits.shape[1] != 2:
+            raise ValueError(
+                f"evaluate expects binary (B, 2) logits; got shape {tuple(logits.shape)}"
+            )
         loss = criterion(logits, labels)
         total_loss += float(loss.cpu().item())
         n_batches += 1
@@ -51,6 +56,11 @@ def evaluate(
     try:
         auc = float(roc_auc_score(y_true, y_probs))
     except ValueError:
+        warnings.warn(
+            "evaluate: AUC undefined (only one class in y_true). "
+            "Returning auc=None — check loader configuration.",
+            RuntimeWarning, stacklevel=2,
+        )
         auc = None
 
     return {

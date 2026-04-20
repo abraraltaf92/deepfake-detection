@@ -44,8 +44,8 @@ def main() -> None:
         # --- per-manipulation breakdown ---
         # Build a "test-like" df where each row has a source_class
         br = per_manipulation_breakdown(df, metrics["y_pred"], metrics["y_probs"], FAKE_CLASSES)
-        # At least one fake class should appear in the breakdown
-        assert len(br) >= 1, br
+        # All 4 fake classes should appear in the breakdown
+        assert set(br.keys()) == set(FAKE_CLASSES), br
 
         # --- cross_dataset_eval ---
         xd = cross_dataset_eval(model, {"ffpp_test": loader, "celebdf_test": loader}, criterion, device=torch.device("cpu"))
