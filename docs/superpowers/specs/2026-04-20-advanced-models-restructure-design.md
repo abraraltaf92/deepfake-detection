@@ -18,7 +18,7 @@ This spec describes how to absorb that work into the repo — tested, optimized,
 1. Deliver runnable, reproducible `05_model_advanced.ipynb` and `06_evaluation.ipynb` on `dev/abrar`, following the repo's numbered-notebook standard.
 2. Extract duplicated algorithmic code into a reusable `src/` package.
 3. Selectively upgrade `02_eda.ipynb` and `03_preprocessing.ipynb` where the teammate's work is genuinely better than what exists.
-4. Produce an apples-to-apples leaderboard in `logs/results.csv` comparing all five models (ResNet-18 baseline + four advanced) on the same data splits.
+4. Produce an apples-to-apples leaderboard in `experiments/results.csv` comparing all five models (ResNet-18 baseline + four advanced) on the same data splits.
 5. Make the architecture experiment-friendly: hyperparameter sweeps (resolution, FPS, batch size) and additional cross-datasets (DFDC, etc.) should be one-line changes in a future phase.
 6. Ship the work in three reviewable PRs, not one mega-PR.
 
@@ -80,9 +80,9 @@ deepfake-detection/
 │   ├── 04_model_baseline.ipynb     # minor — import from src, log to results.csv (same numbers preserved)
 │   ├── 05_model_advanced.ipynb     # new — 4 models as markdown-headed sections
 │   └── 06_evaluation.ipynb         # new — Celeb-DF, ensemble, ROC, Grad-CAM
-└── logs/
-    ├── results.csv                 # NEW — append-only leaderboard
-    └── results/<run_id>.json       # NEW — one file per run, full detail
+└── experiments/
+    ├── results.csv                 # NEW — append-only leaderboard (committed)
+    └── results/<run_id>.json       # NEW — one file per run, full detail (committed)
 ```
 
 **Single-run data flow:**
@@ -217,7 +217,7 @@ Locally: `export DEEPFAKE_REPO_ROOT=$HOME/codebase/deepfake-detection`. On Colab
 ### 7.4 `04_model_baseline.ipynb` — minor update
 
 - Replace inline training/eval code with calls to `src.training.train_two_stage` and `src.evaluation.evaluate`. The ResNet-18 architecture and hyperparameters stay identical; the expected output is the same 86% / 0.9333 F1.
-- Append one row to `logs/results.csv` so ResNet-18 appears in the leaderboard next to the four advanced models.
+- Append one row to `experiments/results.csv` so ResNet-18 appears in the leaderboard next to the four advanced models.
 - **Merge criterion:** numbers match the current baseline after refactor.
 
 ### 7.5 `05_model_advanced.ipynb` — new (replaces current stub)
@@ -264,7 +264,7 @@ Structure:
 ## Ensemble (soft-vote across all 4 models)
 ## ROC overlay (5 models × 2 datasets)
 ## Grad-CAM panel — what each model attends to
-## Final leaderboard table (regenerated from logs/results.csv)
+## Final leaderboard table (regenerated from experiments/results.csv)
 ## Discussion — what generalizes, what doesn't, and why
 ```
 
@@ -283,11 +283,11 @@ Hybrid: local M5 Pro for dev and subset runs, Colab Pro for full runs. See the p
 | Full R3D-18 + RAFT training                  | Colab Pro (required — optical flow MPS support incomplete) |
 | Cross-dataset evaluation, ROC, Grad-CAM      | Either                |
 
-Every training run checkpoints per epoch. Final numbers reported in README and `logs/results.csv` come from Colab Pro runs with `environment = "colab-pro-<gpu>"`.
+Every training run checkpoints per epoch. Final numbers reported in README and `experiments/results.csv` come from Colab Pro runs with `environment = "colab-pro-<gpu>"`.
 
 ## 9. Experiment Logging Schema
 
-### 9.1 `logs/results.csv` — leaderboard
+### 9.1 `experiments/results.csv` — leaderboard
 
 One row per run, append-only. Columns:
 
@@ -302,7 +302,7 @@ generalization_gap_auc, train_time_minutes, notes
 - `celebdf_*` columns are empty when written by `05_model_advanced.ipynb`; filled in by `06_evaluation.ipynb`.
 - `environment` disambiguates local vs. Colab rows so timing comparisons stay honest.
 
-### 9.2 `logs/results/<run_id>.json` — full detail
+### 9.2 `experiments/results/<run_id>.json` — full detail
 
 ```json
 {
@@ -337,7 +337,7 @@ JSON is the single source of truth. The CSV is a projection. `src.logging.recons
 - Add `src/` package (all modules).
 - Add `configs/experiments.py`.
 - Update `configs/paths.py` for local/Colab `REPO_ROOT` override.
-- Refactor `04_model_baseline.ipynb` to use `src`; append its run to `logs/results.csv`.
+- Refactor `04_model_baseline.ipynb` to use `src`; append its run to `experiments/results.csv`.
 - **Merge criterion:** ResNet-18 baseline reproduces 86% / 0.9333 F1 after the refactor; one row in `results.csv`.
 
 ### PR 2 — EDA and preprocessing upgrades
