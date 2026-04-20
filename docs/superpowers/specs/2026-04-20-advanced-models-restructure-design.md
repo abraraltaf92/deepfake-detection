@@ -350,17 +350,21 @@ JSON is the single source of truth. The CSV is a projection. `src.logging.recons
 
 - New `05_model_advanced.ipynb` (four models as markdown-headed sections).
 - New `06_evaluation.ipynb` (Celeb-DF, ensemble, ROC overlay, Grad-CAM).
-- **Merge criterion:** all four models trained on Colab Pro full dataset, results logged to `results.csv` and `results/<run_id>.json`, analysis markdown written in Abrar's voice. README's performance table updated.
+- **Merge criteria:**
+  - All four models trained on Colab Pro full dataset, results logged to `results.csv` and `results/<run_id>.json`.
+  - Analysis markdown written in Abrar's voice.
+  - README's performance table updated.
+  - **Final numbers reported in README come from Colab Pro runs only** (per-epoch checkpointed to Drive). Reported numbers must match the `run_id` JSON — no retyping from screen output.
 
 Each PR stands alone. If PR 3 drags, PRs 1 and 2 are already landed value.
 
 ## 11. Validation Strategy
 
-1. **Module-level import-and-call checks.** A scratch notebook that imports each `src.*` module and exercises one function on a 2-video fixture. Catches typos, device bugs, import cycles. Not pytest — just a run-once gate.
-2. **Smoke-test flag in every notebook.** `SMOKE_TEST = True` at the top switches every notebook to 50 train videos / 20 val / 20 test, 1 + 1 epochs. Smoke runtime target: **under 10 minutes per notebook on M5 Pro.**
-3. **Reproducibility check before claiming a PR is done.** Restart kernel → Run All → confirm success without manual intervention and that expected log rows appear.
-4. **Environment parity check.** Each training path runs once on M5 Pro (MPS) and once on Colab (CUDA) and produces plausible metrics on the smoke subset. This catches silent MPS-vs-CUDA behavior differences, especially around mixed precision.
-5. **Final numbers in README come from Colab Pro runs only.** Per-epoch checkpoints to Drive so session loss doesn't mean restarting. Reported numbers must match the `run_id` JSON — no retyping.
+Two rules, non-negotiable. Anything less bets on nothing going wrong; anything more is ceremony for a research-notebook project.
+
+1. **Smoke-test flag in every notebook runs on both MPS and CUDA.** Every notebook ships with a `SMOKE_TEST = True` switch at the top that reduces data to 50 train / 20 val / 20 test videos and training to 1 + 1 epochs. Target: **under 10 minutes end-to-end per notebook on the M5 Pro.** Each change to `src/*` is validated by smoke-testing once locally (MPS) and once on Colab (CUDA) before the PR lands. This is the only thing that catches silent MPS-vs-CUDA behavior differences (mixed-precision paths, 3D-conv fallbacks) before you burn real Colab time on them.
+
+2. **Restart kernel → Run All is the PR merge gate.** For every notebook a PR touches, a fresh-kernel Run All must complete cleanly and produce the expected log rows. No exceptions. This is the only defense against "works if you run cells in the right order" — the failure mode that notebooks are infamous for and that will burn your capstone reproducibility otherwise.
 
 ## 12. Risks and Mitigations
 
