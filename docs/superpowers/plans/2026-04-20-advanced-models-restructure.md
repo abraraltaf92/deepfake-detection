@@ -621,23 +621,22 @@ training in stage 1 and full fine-tune in stage 2 uniformly.
 """
 from __future__ import annotations
 
-from abc import abstractmethod
-from typing import Iterable
+from abc import ABC, abstractmethod
 
 import torch
 import torch.nn as nn
 import torchvision.models as tv_models
 
 
-class DeepfakeClassifier(nn.Module):
+class DeepfakeClassifier(nn.Module, ABC):
     """Base class. Subclasses must implement forward and expose head/backbone parameter groups."""
 
     @abstractmethod
-    def head_parameters(self) -> Iterable[nn.Parameter]:
+    def head_parameters(self) -> list[nn.Parameter]:
         ...
 
     @abstractmethod
-    def backbone_parameters(self) -> Iterable[nn.Parameter]:
+    def backbone_parameters(self) -> list[nn.Parameter]:
         ...
 
 
@@ -667,41 +666,41 @@ class ResNetBinaryVideoClassifier(DeepfakeClassifier):
         # x: (B, T, C, H, W)
         B, T, C, H, W = x.shape
         x = x.view(B * T, C, H, W)
-        features = self.backbone(x)                 # (B*T, F)
-        logits = self.head(features)                # (B*T, 2)
-        logits = logits.view(B, T, 2).mean(dim=1)   # (B, 2)
+        features = self.backbone(x)                        # (B*T, F)
+        features = features.view(B, T, -1).mean(dim=1)     # (B, F) — temporal avg pool BEFORE head
+        logits = self.head(features)                       # (B, 2)
         return logits
 
-    def head_parameters(self) -> Iterable[nn.Parameter]:
-        return self.head.parameters()
+    def head_parameters(self) -> list[nn.Parameter]:
+        return list(self.head.parameters())
 
-    def backbone_parameters(self) -> Iterable[nn.Parameter]:
-        return self.backbone.parameters()
+    def backbone_parameters(self) -> list[nn.Parameter]:
+        return list(self.backbone.parameters())
 
 
 # =============================================================================
-# Placeholders for Phase 3 — filled in during Tasks 21–24.
+# Placeholders for Phase 3 — filled in during Tasks 16–19.
 # Keeping the names here so type references from configs.experiments.py resolve
 # even before Phase 3 implementation.
 # =============================================================================
 class EfficientNetDeepfakeDetector(DeepfakeClassifier):
     def __init__(self, *args, **kwargs):
-        raise NotImplementedError("Implemented in Phase 3 / Task 21")
+        raise NotImplementedError("Implemented in Phase 3 / Task 16")
 
 
 class R3D18DeepfakeDetector(DeepfakeClassifier):
     def __init__(self, *args, **kwargs):
-        raise NotImplementedError("Implemented in Phase 3 / Task 22")
+        raise NotImplementedError("Implemented in Phase 3 / Task 17")
 
 
 class ViTDeepfakeDetector(DeepfakeClassifier):
     def __init__(self, *args, **kwargs):
-        raise NotImplementedError("Implemented in Phase 3 / Task 23")
+        raise NotImplementedError("Implemented in Phase 3 / Task 18")
 
 
 class R3D18RAFTDeepfakeDetector(DeepfakeClassifier):
     def __init__(self, *args, **kwargs):
-        raise NotImplementedError("Implemented in Phase 3 / Task 24")
+        raise NotImplementedError("Implemented in Phase 3 / Task 19")
 ```
 
 - [ ] **Step 4.4: Run the validation script — should pass**
