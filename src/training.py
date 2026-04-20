@@ -10,10 +10,9 @@ in full precision — GradScaler's MPS support lags CUDA.
 from __future__ import annotations
 
 import copy
-import json
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -35,7 +34,7 @@ def train_one_epoch(
     criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    scaler: Optional[torch.cuda.amp.GradScaler] = None,
+    scaler: Optional[torch.amp.GradScaler] = None,
 ) -> float:
     """Run one training epoch. Returns mean loss over the epoch."""
     model.train()
@@ -47,7 +46,7 @@ def train_one_epoch(
         optimizer.zero_grad(set_to_none=True)
 
         if scaler is not None and device.type == "cuda":
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast(device_type="cuda"):
                 logits = model(frames)
                 loss = criterion(logits, labels)
             scaler.scale(loss).backward()
@@ -110,16 +109,14 @@ def train_two_stage(
     """
     device = device or pick_device()
     model.to(device)
-    criterion = nn.CrossEntropyLoss(weight=config.get("class_weights"))
-    if isinstance(criterion.weight, torch.Tensor):
-        criterion.weight = criterion.weight.to(device)
+    criterion = nn.CrossEntropyLoss(weight=config.get("class_weights")).to(device)
 
     ckpt_dir = Path(config["checkpoint_dir"])
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     run_id = config["run_id"]
 
     use_amp = (device.type == "cuda")
-    scaler = torch.cuda.amp.GradScaler() if use_amp else None
+    scaler = torch.amp.GradScaler("cuda") if use_amp else None
 
     history = {"stage1": {"train_loss": [], "val_loss": [], "val_acc": []},
                "stage2": {"train_loss": [], "val_loss": [], "val_acc": []}}

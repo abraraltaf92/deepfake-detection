@@ -791,12 +791,29 @@ def main() -> None:
                 assert len(history[stage][key]) == 1, history[stage][key]
         assert isinstance(best_state, dict)
 
+        # Verify per-epoch checkpoints were written
+        ckpt_dir = Path(config["checkpoint_dir"])
+        assert (ckpt_dir / "test_run_stage1_epoch1.pth").exists()
+        assert (ckpt_dir / "test_run_stage2_epoch1.pth").exists()
+        assert (ckpt_dir / "test_run_best.pth").exists()
+
         # --- save / load round-trip ---
         ckpt_path = tmp / "roundtrip.pth"
         save_checkpoint(best_state, ckpt_path, meta={"test": True})
         model2 = ResNetBinaryVideoClassifier()
         meta = load_checkpoint(model2, ckpt_path)
         assert meta.get("test") is True
+
+        # Exercise the class_weights path (was previously untested)
+        model3 = ResNetBinaryVideoClassifier()
+        config_weighted = dict(
+            lr_stage1=1e-3, lr_stage2=1e-4,
+            epochs_stage1=1, epochs_stage2=1,
+            checkpoint_dir=str(tmp / "ckpts_weighted"),
+            run_id="test_weighted",
+            class_weights=torch.tensor([1.0, 2.0]),
+        )
+        _, _ = train_two_stage(model3, train_loader, val_loader, config_weighted, device=torch.device("cpu"))
 
         print("ok")
     finally:
@@ -831,10 +848,9 @@ in full precision — GradScaler's MPS support lags CUDA.
 from __future__ import annotations
 
 import copy
-import json
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -856,7 +872,7 @@ def train_one_epoch(
     criterion: nn.Module,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    scaler: Optional[torch.cuda.amp.GradScaler] = None,
+    scaler: Optional[torch.amp.GradScaler] = None,
 ) -> float:
     """Run one training epoch. Returns mean loss over the epoch."""
     model.train()
@@ -868,7 +884,7 @@ def train_one_epoch(
         optimizer.zero_grad(set_to_none=True)
 
         if scaler is not None and device.type == "cuda":
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast(device_type="cuda"):
                 logits = model(frames)
                 loss = criterion(logits, labels)
             scaler.scale(loss).backward()
@@ -931,16 +947,14 @@ def train_two_stage(
     """
     device = device or pick_device()
     model.to(device)
-    criterion = nn.CrossEntropyLoss(weight=config.get("class_weights"))
-    if isinstance(criterion.weight, torch.Tensor):
-        criterion.weight = criterion.weight.to(device)
+    criterion = nn.CrossEntropyLoss(weight=config.get("class_weights")).to(device)
 
     ckpt_dir = Path(config["checkpoint_dir"])
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     run_id = config["run_id"]
 
     use_amp = (device.type == "cuda")
-    scaler = torch.cuda.amp.GradScaler() if use_amp else None
+    scaler = torch.amp.GradScaler("cuda") if use_amp else None
 
     history = {"stage1": {"train_loss": [], "val_loss": [], "val_acc": []},
                "stage2": {"train_loss": [], "val_loss": [], "val_acc": []}}

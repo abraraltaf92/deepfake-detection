@@ -57,12 +57,29 @@ def main() -> None:
                 assert len(history[stage][key]) == 1, history[stage][key]
         assert isinstance(best_state, dict)
 
+        # Verify per-epoch checkpoints were written
+        ckpt_dir = Path(config["checkpoint_dir"])
+        assert (ckpt_dir / "test_run_stage1_epoch1.pth").exists()
+        assert (ckpt_dir / "test_run_stage2_epoch1.pth").exists()
+        assert (ckpt_dir / "test_run_best.pth").exists()
+
         # --- save / load round-trip ---
         ckpt_path = tmp / "roundtrip.pth"
         save_checkpoint(best_state, ckpt_path, meta={"test": True})
         model2 = ResNetBinaryVideoClassifier()
         meta = load_checkpoint(model2, ckpt_path)
         assert meta.get("test") is True
+
+        # Exercise the class_weights path (was previously untested)
+        model3 = ResNetBinaryVideoClassifier()
+        config_weighted = dict(
+            lr_stage1=1e-3, lr_stage2=1e-4,
+            epochs_stage1=1, epochs_stage2=1,
+            checkpoint_dir=str(tmp / "ckpts_weighted"),
+            run_id="test_weighted",
+            class_weights=torch.tensor([1.0, 2.0]),
+        )
+        _, _ = train_two_stage(model3, train_loader, val_loader, config_weighted, device=torch.device("cpu"))
 
         print("ok")
     finally:
