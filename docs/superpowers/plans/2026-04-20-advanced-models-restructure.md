@@ -1332,6 +1332,17 @@ def main() -> None:
         assert reconstructed["run_id"] == rid
         assert "ffpp_test_auc" in reconstructed
 
+        # Partial update — 06_evaluation.ipynb scenario: upsert celebdf_* without blowing away ffpp_*
+        append_run_to_csv(rid, {}, {"celebdf_acc": 0.8, "celebdf_auc": 0.75}, csv_path)
+        df3 = pd.read_csv(csv_path)
+        assert len(df3) == 1
+        row = df3.iloc[0]
+        assert row["celebdf_acc"] == 0.8
+        assert row["celebdf_auc"] == 0.75
+        # crucial — ffpp columns from original row must still be present
+        assert row["ffpp_test_f1"] == 0.88, row.to_dict()
+        assert row["ffpp_test_auc"] == 0.93, row.to_dict()
+
         print("ok")
     finally:
         shutil.rmtree(tmp)
@@ -1401,15 +1412,40 @@ def _row_from(run_id: str, config: dict, metrics: dict) -> dict:
 
 
 def append_run_to_csv(run_id: str, config: dict, metrics: dict, csv_path: Path) -> None:
-    """Upsert by run_id. Creates the CSV with header if missing."""
+    """Upsert by run_id with merge semantics.
+
+    - Creates the CSV with header if missing.
+    - If run_id already exists, merges new config+metrics into the existing row
+      rather than replacing it wholesale — this allows partial updates (e.g.
+      06_evaluation.ipynb filling in celebdf_* without wiping ffpp_* columns).
+    """
     csv_path = Path(csv_path)
     csv_path.parent.mkdir(parents=True, exist_ok=True)
 
-    new_row = _row_from(run_id, config, metrics)
+    existing_row = None
+    existing_df = None
     if csv_path.exists():
-        df = pd.read_csv(csv_path)
-        df = df[df["run_id"] != run_id]  # drop existing row if any
-        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+        existing_df = pd.read_csv(csv_path)
+        match = existing_df[existing_df["run_id"] == run_id]
+        if not match.empty:
+            existing_row = match.iloc[0].to_dict()
+
+    if existing_row is None:
+        new_row = _row_from(run_id, config, metrics)
+    else:
+        # Merge — keep existing values, override with new non-None config+metrics values
+        new_row = dict(existing_row)
+        new_row["run_id"] = run_id
+        new_row["timestamp"] = datetime.now().isoformat(timespec="seconds")
+        for key in CSV_COLUMNS:
+            if key in config:
+                new_row[key] = config[key]
+            if key in metrics:
+                new_row[key] = metrics[key]
+
+    if existing_df is not None:
+        existing_df = existing_df[existing_df["run_id"] != run_id]
+        df = pd.concat([existing_df, pd.DataFrame([new_row])], ignore_index=True)
     else:
         df = pd.DataFrame([new_row], columns=CSV_COLUMNS)
     df = df.reindex(columns=CSV_COLUMNS)
@@ -1418,7 +1454,8 @@ def append_run_to_csv(run_id: str, config: dict, metrics: dict, csv_path: Path) 
 
 def write_run_json(run_id: str, payload: dict, json_dir: Path) -> Path:
     """Write the full per-run JSON file. Returns the path."""
-    json_dir = Path(json_dir); json_dir.mkdir(parents=True, exist_ok=True)
+    json_dir = Path(json_dir)
+    json_dir.mkdir(parents=True, exist_ok=True)
     path = json_dir / f"{run_id}.json"
     with open(path, "w") as f:
         json.dump(payload, f, indent=2, default=str)
@@ -1443,8 +1480,8 @@ Expected: `ok`.
 - [ ] **Step 7.5: Commit**
 
 ```bash
-git add src/logging.py tests/test_logging.py
-git commit -m "src.logging: run_id + CSV upsert + per-run JSON + reconstruct"
+git add src/logging.py tests/test_logging.py docs/superpowers/plans/2026-04-20-advanced-models-restructure.md
+git commit -m "src.logging: run_id + CSV upsert (merge-semantics) + per-run JSON + reconstruct"
 ```
 
 ---
