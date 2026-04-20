@@ -18,6 +18,7 @@ from tests.fixtures import make_tiny_split_df, make_fake_frames_root, tempdir
 
 def main() -> None:
     tmp = tempdir()
+    torch.manual_seed(42)
     try:
         df = make_tiny_split_df(n_real=4, n_fake=8)  # imbalance for sampler test
         frames_root = make_fake_frames_root(tmp, df, num_frames=16, img_size=224)

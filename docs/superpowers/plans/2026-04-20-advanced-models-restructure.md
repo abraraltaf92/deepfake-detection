@@ -343,6 +343,7 @@ from tests.fixtures import make_tiny_split_df, make_fake_frames_root, tempdir
 
 def main() -> None:
     tmp = tempdir()
+    torch.manual_seed(42)
     try:
         df = make_tiny_split_df(n_real=4, n_fake=8)  # imbalance for sampler test
         frames_root = make_fake_frames_root(tmp, df, num_frames=16, img_size=224)
@@ -464,7 +465,10 @@ class DeepfakeBinaryDataset(Dataset):
 
         frames = []
         for p in selected:
-            img = cv2.cvtColor(cv2.imread(str(p)), cv2.COLOR_BGR2RGB)
+            img = cv2.imread(str(p))
+            if img is None:
+                raise FileNotFoundError(f"cv2.imread failed to read {p}")
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             if self.transform is not None:
                 img = self.transform(img)
             frames.append(img)
@@ -476,7 +480,7 @@ class DeepfakeBinaryDataset(Dataset):
 
 def build_weighted_sampler(df: pd.DataFrame) -> WeightedRandomSampler:
     """Class-balanced sampler so each epoch sees roughly equal real/fake examples."""
-    targets = df["binary_target"].to_numpy()
+    targets = df["binary_target"].to_numpy().astype(int)
     class_counts = np.bincount(targets)
     class_weights = 1.0 / np.clip(class_counts, a_min=1, a_max=None)
     sample_weights = class_weights[targets]
