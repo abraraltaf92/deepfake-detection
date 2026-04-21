@@ -14,6 +14,10 @@ logs/
 *.jpg
 *.png
 *.jpeg
+# Exception: committed docs diagrams (architecture, etc.)
+!docs/**/*.png
+!docs/**/*.jpg
+!docs/**/*.jpeg
 
 # === Python ===
 __pycache__/
