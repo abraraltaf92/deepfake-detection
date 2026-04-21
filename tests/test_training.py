@@ -16,7 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.datasets import DeepfakeBinaryDataset
 from src.models import ResNetBinaryVideoClassifier
 from src.training import (
-    pick_device, train_one_epoch, train_two_stage, save_checkpoint, load_checkpoint
+    pick_device, train_one_epoch, train_two_stage, save_checkpoint, load_checkpoint,
+    train_single_stage,
 )
 from tests.fixtures import make_tiny_split_df, make_fake_frames_root, tempdir
 from torch.utils.data import DataLoader
@@ -80,6 +81,24 @@ def main() -> None:
             class_weights=torch.tensor([1.0, 2.0]),
         )
         _, _ = train_two_stage(model3, train_loader, val_loader, config_weighted, device=torch.device("cpu"))
+
+        # Exercise train_single_stage
+        model4 = ResNetBinaryVideoClassifier()
+        config_single = dict(
+            lr=1e-4, weight_decay=1e-4, epochs=2,
+            checkpoint_dir=str(tmp / "ckpts_single"),
+            run_id="test_single",
+            class_weights=torch.tensor([1.0, 2.0]),
+            scheduler_patience=1, scheduler_factor=0.5,
+        )
+        best_single, history_single = train_single_stage(
+            model4, train_loader, val_loader, config_single, device=torch.device("cpu")
+        )
+        for key in ("train_loss", "val_loss", "val_acc", "val_f1"):
+            assert key in history_single, f"missing {key}"
+            assert len(history_single[key]) == 2, f"{key} length"
+        assert (Path(config_single["checkpoint_dir"]) / "test_single_epoch1.pth").exists()
+        assert (Path(config_single["checkpoint_dir"]) / "test_single_best.pth").exists()
 
         print("ok")
     finally:

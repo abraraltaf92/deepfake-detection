@@ -22,17 +22,21 @@ BASE_CONFIG = dict(
 RESNET18_CONFIG = {
     **BASE_CONFIG,
     "model": "resnet18",
-    "lr_stage1": 1e-3,
-    "lr_stage2": 1e-4,
-    "epochs_stage1": 3,
-    "epochs_stage2": 12,
-    # The current baseline was trained pre-MTCNN — override here when re-using.
-    "face_detector": "haar",
+    "train_mode": "single_stage",
+    "lr": 1e-4,
+    "weight_decay": 1e-4,
+    "epochs": 15,
+    "scheduler_patience": 3,
+    "scheduler_factor": 0.5,
+    "weighted_sampler": False,  # baseline used plain shuffle
+    "augmentation": False,      # baseline used normalize-only transforms
+    "face_detector": "haar",    # legacy — current baseline predates MTCNN swap
 }
 
 EFFICIENTNET_B4_CONFIG = {
     **BASE_CONFIG,
     "model": "efficientnet_b4",
+    "train_mode": "two_stage",
     "lr_stage1": 1e-3,
     "lr_stage2": 1e-4,
     "epochs_stage1": 3,
@@ -42,6 +46,7 @@ EFFICIENTNET_B4_CONFIG = {
 R3D18_CONFIG = {
     **BASE_CONFIG,
     "model": "r3d18",
+    "train_mode": "two_stage",
     "lr_stage1": 1e-3,
     "lr_stage2": 1e-4,
     "epochs_stage1": 3,
@@ -51,6 +56,7 @@ R3D18_CONFIG = {
 VIT_CONFIG = {
     **BASE_CONFIG,
     "model": "vit_base_patch16_224",
+    "train_mode": "two_stage",
     "lr_stage1": 5e-4,
     "lr_stage2": 5e-5,
     "epochs_stage1": 3,
@@ -60,6 +66,7 @@ VIT_CONFIG = {
 R3D18_RAFT_CONFIG = {
     **BASE_CONFIG,
     "model": "r3d18_raft",
+    "train_mode": "two_stage",
     "num_frames": 16,     # RAFT-interpolated, same count
     "lr_stage1": 1e-3,
     "lr_stage2": 1e-4,

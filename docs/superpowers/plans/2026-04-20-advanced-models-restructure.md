@@ -721,7 +721,7 @@ git commit -m "src.models: DeepfakeClassifier base + ResNet-18 migration (4 adva
 
 ---
 
-### Task 5: `src/training.py` — pick_device + train_one_epoch + train_two_stage + checkpointing
+### Task 5: `src/training.py` — pick_device + train_one_epoch + train_single_stage + train_two_stage + checkpointing
 
 **Files:**
 - Create: `src/training.py`
@@ -750,7 +750,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.datasets import DeepfakeBinaryDataset
 from src.models import ResNetBinaryVideoClassifier
 from src.training import (
-    pick_device, train_one_epoch, train_two_stage, save_checkpoint, load_checkpoint
+    pick_device, train_one_epoch, train_two_stage, save_checkpoint, load_checkpoint,
+    train_single_stage,
 )
 from tests.fixtures import make_tiny_split_df, make_fake_frames_root, tempdir
 from torch.utils.data import DataLoader
@@ -815,6 +816,24 @@ def main() -> None:
         )
         _, _ = train_two_stage(model3, train_loader, val_loader, config_weighted, device=torch.device("cpu"))
 
+        # Exercise train_single_stage
+        model4 = ResNetBinaryVideoClassifier()
+        config_single = dict(
+            lr=1e-4, weight_decay=1e-4, epochs=2,
+            checkpoint_dir=str(tmp / "ckpts_single"),
+            run_id="test_single",
+            class_weights=torch.tensor([1.0, 2.0]),
+            scheduler_patience=1, scheduler_factor=0.5,
+        )
+        best_single, history_single = train_single_stage(
+            model4, train_loader, val_loader, config_single, device=torch.device("cpu")
+        )
+        for key in ("train_loss", "val_loss", "val_acc", "val_f1"):
+            assert key in history_single, f"missing {key}"
+            assert len(history_single[key]) == 2, f"{key} length"
+        assert (Path(config_single["checkpoint_dir"]) / "test_single_epoch1.pth").exists()
+        assert (Path(config_single["checkpoint_dir"]) / "test_single_best.pth").exists()
+
         print("ok")
     finally:
         shutil.rmtree(tmp)
@@ -835,188 +854,10 @@ Expected: `ModuleNotFoundError: No module named 'src.training'`.
 
 - [ ] **Step 5.3: Write `src/training.py`**
 
-```python
-"""Training utilities — device selection, single-epoch loop, 2-stage fine-tune.
+See current `src/training.py` — the file now includes `train_single_stage` and `_val_with_f1` in addition to the original functions. Key additions (A2 correction):
 
-The 2-stage recipe (stage 1: head-only with frozen backbone; stage 2: full
-fine-tune at lower LR) was duplicated four times in the teammate's notebook,
-once per model. Here it lives once.
-
-Mixed precision: enabled via GradScaler only on CUDA. MPS and CPU paths run
-in full precision — GradScaler's MPS support lags CUDA.
-"""
-from __future__ import annotations
-
-import copy
-import time
-from pathlib import Path
-from typing import Optional
-
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
-
-
-def pick_device() -> torch.device:
-    """Return the best available device in priority order: cuda → mps → cpu."""
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
-
-
-def train_one_epoch(
-    model: nn.Module,
-    loader: DataLoader,
-    criterion: nn.Module,
-    optimizer: torch.optim.Optimizer,
-    device: torch.device,
-    scaler: Optional[torch.amp.GradScaler] = None,
-) -> float:
-    """Run one training epoch. Returns mean loss over the epoch."""
-    model.train()
-    total_loss = 0.0
-    n_batches = 0
-    for frames, labels in loader:
-        frames = frames.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
-        optimizer.zero_grad(set_to_none=True)
-
-        if scaler is not None and device.type == "cuda":
-            with torch.amp.autocast(device_type="cuda"):
-                logits = model(frames)
-                loss = criterion(logits, labels)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            logits = model(frames)
-            loss = criterion(logits, labels)
-            loss.backward()
-            optimizer.step()
-
-        total_loss += float(loss.detach().cpu().item())
-        n_batches += 1
-    return total_loss / max(n_batches, 1)
-
-
-@torch.no_grad()
-def _quick_val(model: nn.Module, loader: DataLoader, criterion: nn.Module, device: torch.device) -> tuple[float, float]:
-    """Lightweight loss + accuracy on val set. For full metrics use src.evaluation.evaluate."""
-    model.eval()
-    total_loss = 0.0
-    n_batches = 0
-    correct = 0
-    total = 0
-    for frames, labels in loader:
-        frames = frames.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
-        logits = model(frames)
-        loss = criterion(logits, labels)
-        total_loss += float(loss.cpu().item())
-        n_batches += 1
-        preds = logits.argmax(dim=1)
-        correct += int((preds == labels).sum().cpu().item())
-        total += int(labels.numel())
-    return total_loss / max(n_batches, 1), correct / max(total, 1)
-
-
-def _set_requires_grad(params, flag: bool) -> None:
-    for p in params:
-        p.requires_grad = flag
-
-
-def train_two_stage(
-    model: "src.models.DeepfakeClassifier",
-    train_loader: DataLoader,
-    val_loader: DataLoader,
-    config: dict,
-    device: Optional[torch.device] = None,
-) -> tuple[dict, dict]:
-    """Two-stage transfer learning:
-       stage 1: freeze backbone, train head only at lr_stage1.
-       stage 2: unfreeze all, fine-tune at lr_stage2.
-
-    Checkpoints per epoch to `config['checkpoint_dir']/<run_id>_stage{1|2}_epoch{N}.pth`
-    so Colab disconnects don't lose work.
-
-    Returns (best_state_dict_across_both_stages, history) where history is:
-        { "stage1": {"train_loss": [...], "val_loss": [...], "val_acc": [...]},
-          "stage2": {"train_loss": [...], "val_loss": [...], "val_acc": [...]} }
-    """
-    device = device or pick_device()
-    model.to(device)
-    criterion = nn.CrossEntropyLoss(weight=config.get("class_weights")).to(device)
-
-    ckpt_dir = Path(config["checkpoint_dir"])
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-    run_id = config["run_id"]
-
-    use_amp = (device.type == "cuda")
-    scaler = torch.amp.GradScaler("cuda") if use_amp else None
-
-    history = {"stage1": {"train_loss": [], "val_loss": [], "val_acc": []},
-               "stage2": {"train_loss": [], "val_loss": [], "val_acc": []}}
-    best_val_acc = -1.0
-    best_state = copy.deepcopy(model.state_dict())
-
-    # ---- Stage 1: head only ----
-    _set_requires_grad(model.backbone_parameters(), False)
-    _set_requires_grad(model.head_parameters(), True)
-    optimizer = torch.optim.Adam(model.head_parameters(), lr=config["lr_stage1"])
-    for epoch in range(config["epochs_stage1"]):
-        t0 = time.time()
-        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, scaler)
-        val_loss, val_acc = _quick_val(model, val_loader, criterion, device)
-        history["stage1"]["train_loss"].append(train_loss)
-        history["stage1"]["val_loss"].append(val_loss)
-        history["stage1"]["val_acc"].append(val_acc)
-        print(f"[stage1 epoch {epoch+1}/{config['epochs_stage1']}] "
-              f"train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f} "
-              f"({time.time()-t0:.1f}s)")
-        save_checkpoint(model.state_dict(), ckpt_dir / f"{run_id}_stage1_epoch{epoch+1}.pth",
-                        meta={"stage": 1, "epoch": epoch + 1, "val_acc": val_acc})
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            best_state = copy.deepcopy(model.state_dict())
-
-    # ---- Stage 2: full fine-tune ----
-    _set_requires_grad(model.backbone_parameters(), True)
-    _set_requires_grad(model.head_parameters(), True)
-    optimizer = torch.optim.Adam(model.parameters(), lr=config["lr_stage2"])
-    for epoch in range(config["epochs_stage2"]):
-        t0 = time.time()
-        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, scaler)
-        val_loss, val_acc = _quick_val(model, val_loader, criterion, device)
-        history["stage2"]["train_loss"].append(train_loss)
-        history["stage2"]["val_loss"].append(val_loss)
-        history["stage2"]["val_acc"].append(val_acc)
-        print(f"[stage2 epoch {epoch+1}/{config['epochs_stage2']}] "
-              f"train_loss={train_loss:.4f} val_loss={val_loss:.4f} val_acc={val_acc:.4f} "
-              f"({time.time()-t0:.1f}s)")
-        save_checkpoint(model.state_dict(), ckpt_dir / f"{run_id}_stage2_epoch{epoch+1}.pth",
-                        meta={"stage": 2, "epoch": epoch + 1, "val_acc": val_acc})
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            best_state = copy.deepcopy(model.state_dict())
-
-    save_checkpoint(best_state, ckpt_dir / f"{run_id}_best.pth",
-                    meta={"best_val_acc": best_val_acc})
-    return best_state, history
-
-
-def save_checkpoint(state_dict: dict, path: Path, meta: Optional[dict] = None) -> None:
-    path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"state_dict": state_dict, "meta": meta or {}}, path)
-
-
-def load_checkpoint(model: nn.Module, path: Path) -> dict:
-    """Load weights into `model` in-place. Returns the meta dict stored alongside."""
-    data = torch.load(Path(path), map_location="cpu")
-    model.load_state_dict(data["state_dict"])
-    return data.get("meta", {})
-```
+- `_val_with_f1`: private helper returning `(val_loss, val_acc, val_f1)` using `sklearn.metrics.f1_score`.
+- `train_single_stage`: single-stage AdamW + ReduceLROnPlateau, no AMP, best checkpoint by val_f1, flat history dict `{"train_loss", "val_loss", "val_acc", "val_f1"}`. Matches historical 86% / 0.9333 F1 recipe.
 
 - [ ] **Step 5.4: Run the validation script — should pass**
 
@@ -1025,13 +866,13 @@ cd /Users/abrar/codebase/deepfake-detection/.claude/worktrees/jovial-mendeleev-a
 /Users/abrar/codebase/deepfake-detection/.venv/bin/python tests/test_training.py
 ```
 
-Expected: `ok`. The training loop will print a couple of epoch lines before the final `ok`.
+Expected: `ok`. The training loop will print epoch lines (two_stage + single_stage) before the final `ok`.
 
 - [ ] **Step 5.5: Commit**
 
 ```bash
 git add src/training.py tests/test_training.py
-git commit -m "src.training: pick_device + train_one_epoch + train_two_stage + checkpoint helpers"
+git commit -m "src.training: add train_single_stage + _val_with_f1 for historical baseline recipe (A2)"
 ```
 
 ---
@@ -1708,17 +1549,21 @@ BASE_CONFIG = dict(
 RESNET18_CONFIG = {
     **BASE_CONFIG,
     "model": "resnet18",
-    "lr_stage1": 1e-3,
-    "lr_stage2": 1e-4,
-    "epochs_stage1": 3,
-    "epochs_stage2": 12,
-    # The current baseline was trained pre-MTCNN — override here when re-using.
-    "face_detector": "haar",
+    "train_mode": "single_stage",
+    "lr": 1e-4,
+    "weight_decay": 1e-4,
+    "epochs": 15,
+    "scheduler_patience": 3,
+    "scheduler_factor": 0.5,
+    "weighted_sampler": False,  # baseline used plain shuffle
+    "augmentation": False,      # baseline used normalize-only transforms
+    "face_detector": "haar",    # legacy — current baseline predates MTCNN swap
 }
 
 EFFICIENTNET_B4_CONFIG = {
     **BASE_CONFIG,
     "model": "efficientnet_b4",
+    "train_mode": "two_stage",
     "lr_stage1": 1e-3,
     "lr_stage2": 1e-4,
     "epochs_stage1": 3,
@@ -1728,6 +1573,7 @@ EFFICIENTNET_B4_CONFIG = {
 R3D18_CONFIG = {
     **BASE_CONFIG,
     "model": "r3d18",
+    "train_mode": "two_stage",
     "lr_stage1": 1e-3,
     "lr_stage2": 1e-4,
     "epochs_stage1": 3,
@@ -1737,6 +1583,7 @@ R3D18_CONFIG = {
 VIT_CONFIG = {
     **BASE_CONFIG,
     "model": "vit_base_patch16_224",
+    "train_mode": "two_stage",
     "lr_stage1": 5e-4,
     "lr_stage2": 5e-5,
     "epochs_stage1": 3,
@@ -1746,6 +1593,7 @@ VIT_CONFIG = {
 R3D18_RAFT_CONFIG = {
     **BASE_CONFIG,
     "model": "r3d18_raft",
+    "train_mode": "two_stage",
     "num_frames": 16,     # RAFT-interpolated, same count
     "lr_stage1": 1e-3,
     "lr_stage2": 1e-4,
@@ -1785,121 +1633,102 @@ git commit -m "configs.experiments: BASE_CONFIG + 5 per-model config dicts"
 
 ---
 
-### Task 10: Refactor `04_model_baseline.ipynb` to use `src/`
+### Task 10: Refactor `04_model_baseline.ipynb` to use `src/` — historical recipe (A2)
 
-**Context:** The current notebook trains ResNet-18 end-to-end with inline code. We want it to call `src.training.train_two_stage` and `src.evaluation.evaluate`, write the run to `experiments/results.csv`, and honor a `SMOKE_TEST` flag — while producing the same 86% / 0.9333 numbers.
+**Context (updated A2):** The baseline notebook must reproduce the historical 86% / 0.9333 F1 run exactly. The recipe is: single-stage AdamW + ReduceLROnPlateau, normalize-only transforms, plain shuffle DataLoader, full FF++ dataset (no subsampling). No `SMOKE_TEST` flag — the whole point is historical numeric fidelity; a smoke version would be meaningless.
 
 **Files:**
-- Modify: `notebooks/04_model_baseline.ipynb` (use the Claude Code NotebookEdit tool for cell-by-cell changes; each step describes which cell and what to change)
+- Modify: `notebooks/04_model_baseline.ipynb`
 
-- [ ] **Step 10.1: Add a new cell near the top (after the initial setup cell) that sets `SMOKE_TEST` and establishes the run_id**
+- [ ] **Step 10.1: Setup cell — normalize-only transforms for both train and val**
 
-Insert a new code cell after the "Setup" cell with:
+The first code cell reads CSVs and defines transforms. Use normalize-only (no RandomHorizontalFlip, no ColorJitter) for both:
+
+```python
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD  = [0.229, 0.224, 0.225]
+train_transform = T.Compose([
+    T.ToPILImage(),
+    T.Resize((IMG_SIZE, IMG_SIZE)),
+    T.ToTensor(),
+    T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+])
+val_transform = train_transform   # identical — no train-time augmentation in baseline
+```
+
+- [ ] **Step 10.2: Imports cell — use `train_single_stage`, drop `train_two_stage` and `load_checkpoint`**
 
 ```python
 import time
 from datetime import datetime
 
-# --- SMOKE_TEST mode ---
-# True  = 50 train / 20 val / 20 test, 1 + 1 epochs, for fast end-to-end validation
-# False = full dataset, production training schedule
-SMOKE_TEST = False
-
-# --- src + config imports ---
-import sys
-sys.path.insert(0, str(REPO_ROOT))  # configs + src live under REPO_ROOT
 from configs.experiments import RESNET18_CONFIG
-from src.datasets      import DeepfakeBinaryDataset, get_dataloaders
-from src.models        import ResNetBinaryVideoClassifier
-from src.training      import train_two_stage, pick_device, load_checkpoint
-from src.evaluation    import evaluate, per_manipulation_breakdown
-from src.logging       import make_run_id, append_run_to_csv, write_run_json
-from src.visualization import plot_training_history, plot_confusion_matrix, plot_roc_curves
-from configs.paths     import RESULTS_CSV, RESULTS_JSON_DIR, MODEL_DIR
+from src.datasets        import DeepfakeBinaryDataset, get_dataloaders
+from src.models          import ResNetBinaryVideoClassifier
+from src.training        import train_single_stage, pick_device
+from src.evaluation      import evaluate, per_manipulation_breakdown
+from src.logging         import make_run_id, append_run_to_csv, write_run_json
+from src.visualization   import plot_training_history, plot_confusion_matrix, plot_roc_curves
 
 RUN_ID = make_run_id("resnet18")
-CONFIG = dict(RESNET18_CONFIG)  # copy so local tweaks don't mutate module state
-CONFIG["run_id"]        = RUN_ID
+CONFIG = dict(RESNET18_CONFIG)
+CONFIG["run_id"]         = RUN_ID
 CONFIG["checkpoint_dir"] = str(MODEL_DIR / "checkpoints" / RUN_ID)
 
 device = pick_device()
 print(f"Run ID : {RUN_ID}")
 print(f"Device : {device}")
-print(f"Smoke  : {SMOKE_TEST}")
 ```
 
-- [ ] **Step 10.2: Replace the cell that defines `DeepfakeBinaryDataset` with an import-only cell**
+- [ ] **Step 10.3: No subsampling — baseline always runs on full dataset**
 
-Find the cell that defines `DeepfakeBinaryDataset` (before the training cell). Since it's now imported from `src.datasets`, delete that cell entirely.
+The SMOKE_TEST / subsampling cell has been removed entirely. `train_df`, `val_df`, `test_df` come directly from `pd.read_csv` in the setup cell without any sampling step. Do not add a SMOKE_TEST flag to this notebook; use `05_model_advanced.ipynb` for iterative development.
 
-- [ ] **Step 10.3: Modify the split-CSV-reading cell to subsample when SMOKE_TEST is True**
-
-Find the cell that reads `TRAIN_CSV`, `VAL_CSV`, `TEST_CSV` into `train_df`, `val_df`, `test_df`. After the reads, add:
-
-```python
-if SMOKE_TEST:
-    train_df = train_df.sample(n=min(50, len(train_df)), random_state=42).reset_index(drop=True)
-    val_df   = val_df.sample(n=min(20, len(val_df)),   random_state=42).reset_index(drop=True)
-    test_df  = test_df.sample(n=min(20, len(test_df)), random_state=42).reset_index(drop=True)
-    print("SMOKE subset sizes:", len(train_df), len(val_df), len(test_df))
-```
-
-- [ ] **Step 10.4: Replace the inline DataLoader-building cell with `get_dataloaders`**
-
-Replace the cell that manually constructs `train_loader`, `val_loader`, `test_loader` with:
+- [ ] **Step 10.4: DataLoader cell — `weighted_sampler=False`, no SMOKE_TEST guard**
 
 ```python
 train_loader, val_loader, test_loader = get_dataloaders(
-    train_df=train_df, val_df=val_df, test_df=test_df,
+    train_df=train_df,
+    val_df=val_df,
+    test_df=test_df,
     frames_root=FRAMES_ROOT,
-    train_transform=train_transform, eval_transform=val_transform,
+    train_transform=train_transform,
+    eval_transform=val_transform,
     batch_size=CONFIG["batch_size"],
     num_frames=CONFIG["num_frames"],
-    num_workers=CONFIG["num_workers"] if not SMOKE_TEST else 0,
-    weighted_sampler=CONFIG["weighted_sampler"],
+    num_workers=CONFIG["num_workers"],
+    weighted_sampler=False,
 )
 ```
 
-- [ ] **Step 10.5: Replace the inline `ResNetBinaryVideoClassifier` class definition cell with an import-only no-op or delete it**
-
-Since the class now lives in `src.models`, delete the cell that defines it in the notebook.
-
-- [ ] **Step 10.6: Replace the model-instantiation + training loop cells with `train_two_stage`**
-
-Find the cells that (a) instantiate the model, (b) define `train_one_epoch` / `evaluate` inline, (c) run the main training loop. Replace them with two cells.
-
-Cell A (model + class weights):
+- [ ] **Step 10.5: Model cell — move `.to(device)` before the batch-shape sanity check**
 
 ```python
-model = ResNetBinaryVideoClassifier(dropout=0.3)
+model = ResNetBinaryVideoClassifier(dropout=0.3).to(device)
 
-# class-weighted loss, computed from training split
 train_counts = train_df["binary_target"].value_counts().sort_index().to_dict()
-num_real = train_counts.get(0, 0); num_fake = train_counts.get(1, 0)
-total = num_real + num_fake
-class_weights = torch.tensor([total / (2 * num_real), total / (2 * num_fake)], dtype=torch.float)
+num_real = train_counts.get(0, 0)
+num_fake = train_counts.get(1, 0)
+total_n  = num_real + num_fake
+class_weights = torch.tensor(
+    [total_n / (2 * max(num_real, 1)), total_n / (2 * max(num_fake, 1))],
+    dtype=torch.float32,
+)
 CONFIG["class_weights"] = class_weights
 print("Class weights:", class_weights.tolist())
-
-# Smoke-test schedule override
-if SMOKE_TEST:
-    CONFIG["epochs_stage1"] = 1
-    CONFIG["epochs_stage2"] = 1
 ```
 
-Cell B (training call):
+- [ ] **Step 10.6: Training call — `train_single_stage` (not `train_two_stage`)**
 
 ```python
 t0 = time.time()
-best_state, history = train_two_stage(model, train_loader, val_loader, CONFIG, device=device)
+best_state, history = train_single_stage(model, train_loader, val_loader, CONFIG, device=device)
 train_minutes = (time.time() - t0) / 60.0
 model.load_state_dict(best_state)
 print(f"Training time: {train_minutes:.1f} min")
 ```
 
-- [ ] **Step 10.7: Replace the inline evaluation cells with `evaluate` + `per_manipulation_breakdown`**
-
-Replace the cells that do inline `evaluate(model, test_loader, ...)` + classification report + confusion matrix with:
+- [ ] **Step 10.7: Evaluation cell — use `test_df` directly (no `_model` suffix)**
 
 ```python
 criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
@@ -1910,40 +1739,52 @@ print(f"FF++ Test  F1       : {ffpp_test['f1']:.4f}")
 print(f"FF++ Test  AUC      : {ffpp_test['auc']:.4f}")
 
 from sklearn.metrics import classification_report
-print(classification_report(ffpp_test["y_true"], ffpp_test["y_pred"], target_names=["real","fake"]))
+print(classification_report(ffpp_test["y_true"], ffpp_test["y_pred"], target_names=["real", "fake"]))
 
-# Per-manipulation breakdown
 FAKE_CLASSES = ["Deepfakes", "Face2Face", "FaceSwap", "NeuralTextures", "FaceShifter"]
-per_manip = per_manipulation_breakdown(test_df, ffpp_test["y_pred"], ffpp_test["y_probs"], FAKE_CLASSES)
+per_manip = per_manipulation_breakdown(
+    test_df, ffpp_test["y_pred"], ffpp_test["y_probs"], FAKE_CLASSES
+)
 for manip, vals in per_manip.items():
-    auc = vals["auc"]
-    print(f"  {manip:16s} AUC={auc:.4f}  F1={vals['f1']:.4f}  n={vals['n_videos']}" if auc is not None else
-          f"  {manip:16s} AUC=—       F1={vals['f1']:.4f}  n={vals['n_videos']}")
+    auc = vals.get("auc")
+    if auc is not None:
+        print(f"  {manip:16s} AUC={auc:.4f}  F1={vals['f1']:.4f}  n={vals['n_videos']}")
+    else:
+        print(f"  {manip:16s} AUC=--      F1={vals['f1']:.4f}  n={vals['n_videos']}")
 ```
 
-- [ ] **Step 10.8: Replace the plotting cells with calls to `src.visualization`**
-
-Replace the inline plotting cells with:
+- [ ] **Step 10.8: Plotting cell — confusion matrix + training history**
 
 ```python
-fig = plot_confusion_matrix(ffpp_test["y_true"], ffpp_test["y_pred"], labels=["real","fake"]);  fig.show()
-fig = plot_training_history(history); fig.show()
+fig = plot_confusion_matrix(ffpp_test["y_true"], ffpp_test["y_pred"], labels=["real", "fake"])
+fig.show()
+fig = plot_training_history(history)
+fig.show()
 ```
 
-- [ ] **Step 10.9: Add a final logging cell that writes the run to `experiments/`**
-
-Append a new code cell at the bottom:
+- [ ] **Step 10.8b: ROC curve (restored — reviewer Minor 3)**
 
 ```python
-import json as _json
+from src.visualization import plot_roc_curves
+fig = plot_roc_curves(
+    {"resnet18_baseline": {"y_true": ffpp_test["y_true"], "y_probs": ffpp_test["y_probs"]}},
+    title="ResNet-18 baseline — FF++ test ROC",
+)
+fig.show()
+```
 
+- [ ] **Step 10.9: Logging cell — flat history keys, `ffpp_val_f1` now populated**
+
+The `train_single_stage` history dict is flat (`{"train_loss", "val_loss", "val_acc", "val_f1"}`). Update accordingly:
+
+```python
 env_kind = "local-m5" if device.type == "mps" else ("colab-pro" if device.type == "cuda" else "cpu")
 
 metrics_row = {
     "environment":            env_kind,
     "device":                 str(device.type),
-    "ffpp_val_acc":           history["stage2"]["val_acc"][-1] if history["stage2"]["val_acc"] else None,
-    "ffpp_val_f1":            None,  # filled by separate val-eval call if desired
+    "ffpp_val_acc":           history["val_acc"][-1] if history["val_acc"] else None,
+    "ffpp_val_f1":            history["val_f1"][-1] if history["val_f1"] else None,
     "ffpp_test_acc":          ffpp_test["accuracy"],
     "ffpp_test_precision":    ffpp_test["precision"],
     "ffpp_test_recall":       ffpp_test["recall"],
@@ -1954,7 +1795,7 @@ metrics_row = {
     "celebdf_auc":            None,
     "generalization_gap_auc": None,
     "train_time_minutes":     round(train_minutes, 2),
-    "notes":                  "smoke" if SMOKE_TEST else "",
+    "notes":                  "",
 }
 
 append_run_to_csv(RUN_ID, CONFIG, metrics_row, RESULTS_CSV)
@@ -1965,37 +1806,33 @@ json_payload = {
     "environment":        {"kind": env_kind, "device": str(device)},
     "config":             {k: v for k, v in CONFIG.items() if k != "class_weights"},
     "training_history":   history,
-    "ffpp_test":          {k: ffpp_test[k] for k in ("accuracy","precision","recall","f1","auc","confusion_matrix")},
+    "ffpp_test":          {k: ffpp_test[k] for k in ("accuracy", "precision", "recall", "f1", "auc", "confusion_matrix")},
     "per_manipulation":   per_manip,
     "celebdf_test":       None,
     "generalization_gap": None,
     "checkpoints":        {"best": str(MODEL_DIR / "checkpoints" / RUN_ID / f"{RUN_ID}_best.pth")},
     "metrics":            metrics_row,
-    "notes":              "smoke" if SMOKE_TEST else "",
+    "notes":              "",
 }
 write_run_json(RUN_ID, json_payload, RESULTS_JSON_DIR)
 print("Logged run:", RUN_ID)
 print("CSV:", RESULTS_CSV)
 ```
 
-- [ ] **Step 10.10: Smoke-run on M5 Pro** (manual — Abrar-gate)
+- [ ] **Step 10.10: Full-dataset Run All on M5 Pro** (manual — Abrar-gate)
 
-Hand off to Abrar:
-
-> PR 1 code is complete. Please run `notebooks/04_model_baseline.ipynb` end-to-end locally with:
+> Baseline reproducibility run (full FF++ dataset, no subsampling):
 > 1. `export DEEPFAKE_REPO_ROOT=$HOME/codebase/deepfake-detection`
-> 2. Activate venv: `source ~/codebase/deepfake-detection/.venv/bin/activate`
-> 3. Start jupyter: `jupyter lab`
-> 4. Open the notebook, set `SMOKE_TEST = True`, Kernel → Restart & Run All.
-> 5. Confirm: it finishes in under ~10 minutes on MPS, a row appears in `experiments/results.csv`, and no cells error.
->
-> Paste back: the final cell output + any errors.
+> 2. `source ~/codebase/deepfake-detection/.venv/bin/activate`
+> 3. `jupyter lab`
+> 4. Open `notebooks/04_model_baseline.ipynb`, Kernel → Restart & Run All.
+> 5. Confirm: completes without errors, `ffpp_test_acc` ≈ 0.86, `ffpp_test_f1` ≈ 0.9333, one row in `experiments/results.csv`.
 
-- [ ] **Step 10.11: Commit the notebook changes**
+- [ ] **Step 10.11: Commit**
 
 ```bash
 git add notebooks/04_model_baseline.ipynb
-git commit -m "04_model_baseline: refactor to use src/, add SMOKE_TEST flag + experiment logging"
+git commit -m "04_model_baseline: revert to historical single-stage recipe (A2)"
 ```
 
 ---
