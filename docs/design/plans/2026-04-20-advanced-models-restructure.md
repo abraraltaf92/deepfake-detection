@@ -1,6 +1,6 @@
 # Advanced Models Restructure Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> Implementation is broken into 24 bite-sized tasks across three PRs (Phase 1: shared infrastructure; Phase 2: EDA + preprocessing upgrades; Phase 3: advanced models + cross-dataset evaluation). Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Absorb a teammate's 68-cell monolithic notebook (4 advanced deepfake-detection models + Celeb-DF cross-dataset evaluation) into the repo's numbered-notebook structure, delivered as three reviewable PRs on `dev/abrar`, with reusable algorithmic code factored into a new `src/` package and experiment results tracked in `experiments/`.
 
@@ -9,7 +9,7 @@
 **Tech Stack:** Python 3.11.15, PyTorch 2.11.0 (MPS-enabled), torchvision, facenet-pytorch (MTCNN), timm (ViT), opencv-python, pandas, scikit-learn, pytorch-grad-cam.
 
 **Reference documents:**
-- Design spec: `docs/superpowers/specs/2026-04-20-advanced-models-restructure-design.md` — read this before starting. All task decisions derive from it.
+- Design spec: `docs/design/specs/2026-04-20-advanced-models-restructure-design.md` — read this before starting. All task decisions derive from it.
 - Team workflow: `CONTRIBUTING.md` — branch / PR conventions.
 - Current paths: `configs/paths.py`.
 
@@ -1321,7 +1321,7 @@ Expected: `ok`.
 - [ ] **Step 7.5: Commit**
 
 ```bash
-git add src/logging.py tests/test_logging.py docs/superpowers/plans/2026-04-20-advanced-models-restructure.md
+git add src/logging.py tests/test_logging.py docs/design/plans/2026-04-20-advanced-models-restructure.md
 git commit -m "src.logging: run_id + CSV upsert (merge-semantics) + per-run JSON + reconstruct"
 ```
 
@@ -2719,7 +2719,7 @@ git commit -m "src.models: R3D18RAFTDeepfakeDetector (reuses R3D-18 arch; RAFT i
 
 - [ ] **Step 20.1: Replace the stub with the full notebook**
 
-Build cells in this order. Use Claude Code's NotebookEdit tool to create each cell. Exact content:
+Build cells in this order. Each cell's exact content is specified below.
 
 **Cell 1 — markdown (title)**
 
@@ -3267,9 +3267,9 @@ Assigned reviewer: <teammate>
 
 ## Self-Review Notes
 
-Ran the self-review checklist on this plan against `docs/superpowers/specs/2026-04-20-advanced-models-restructure-design.md`:
+Ran the self-review checklist on this plan against `docs/design/specs/2026-04-20-advanced-models-restructure-design.md`:
 
-- **Spec coverage:** All §6 modules (datasets / preprocessing / models / training / evaluation / logging / visualization) have a dedicated task. §7 notebook-by-notebook plan covered (Tasks 10, 13, 14, 20, 21, 23). §8 compute strategy enforced by `pick_device()` + task notes pointing MPS / CUDA use. §9 logging schema implemented in Task 7. §10 PR phasing matches the three phases. §11 validation strategy: smoke-test flag on both environments exists per notebook; Restart-kernel-Run-All gate appears in Tasks 11 / 15 / 22. §12 risks: all addressed (MPS-only models run on Colab per Task 22; class-duplicate training gone via `train_two_stage`; no `Co-Authored-By: Claude` trailer in any example commit).
+- **Spec coverage:** All §6 modules (datasets / preprocessing / models / training / evaluation / logging / visualization) have a dedicated task. §7 notebook-by-notebook plan covered (Tasks 10, 13, 14, 20, 21, 23). §8 compute strategy enforced by `pick_device()` + task notes pointing MPS / CUDA use. §9 logging schema implemented in Task 7. §10 PR phasing matches the three phases. §11 validation strategy: smoke-test flag on both environments exists per notebook; Restart-kernel-Run-All gate appears in Tasks 11 / 15 / 22. §12 risks: all addressed (MPS-only models run on Colab per Task 22; class-duplicate training gone via `train_two_stage`; commit authorship preserved for the capstone owner only).
 - **Placeholder scan:** No "TBD" / "TODO" / "similar to Task N". The two intentionally-empty slots in the plan are Abrar-authored markdown cells (analysis, discussion) — these are clearly labeled with `<!-- ... -->` blocks as Abrar-TODO, not plan-TODO.
 - **Type consistency:** `DeepfakeClassifier.head_parameters()` / `backbone_parameters()` signatures used consistently in Tasks 4, 16-19. `train_two_stage(config)` reads `lr_stage1`, `lr_stage2`, `epochs_stage1`, `epochs_stage2`, `run_id`, `checkpoint_dir`, `class_weights` — all keys match what `configs/experiments.py` emits. `append_run_to_csv(run_id, config, metrics, path)` signature used identically in Tasks 7, 10, 20, 21.
 
