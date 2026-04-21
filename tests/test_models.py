@@ -56,6 +56,13 @@ def main() -> None:
     logits = m(x)
     assert logits.shape == (2, 2)
 
+    # --- R3D-18 + RAFT ---
+    from src.models import R3D18RAFTDeepfakeDetector
+    m = R3D18RAFTDeepfakeDetector(dropout=0.3).to(device)
+    x = torch.randn(2, 16, 3, 112, 112, device=device)  # 16 frames, not 8
+    logits = m(x)
+    assert logits.shape == (2, 2)
+
     print("ok")
 
 

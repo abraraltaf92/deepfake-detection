@@ -162,6 +162,13 @@ class ViTDeepfakeDetector(DeepfakeClassifier):
         return list(self.backbone.parameters())
 
 
-class R3D18RAFTDeepfakeDetector(DeepfakeClassifier):
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError("Implemented in Phase 3 / Task 19")
+class R3D18RAFTDeepfakeDetector(R3D18DeepfakeDetector):
+    """Identical architecture to R3D18DeepfakeDetector.
+
+    The difference is *what frames you feed it*: a DataLoader pointed at
+    configs.paths.RAFT_FRAMES_ROOT supplies 16 RAFT-interpolated frames,
+    whereas a DataLoader pointed at FRAMES_ROOT/MTCNN_FRAMES_ROOT supplies
+    natively sampled frames. Kept as a separate class so leaderboard rows and
+    configs.experiments entries can disambiguate.
+    """
+    pass
