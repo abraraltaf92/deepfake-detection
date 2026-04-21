@@ -28,9 +28,9 @@ RESNET18_CONFIG = {
     "epochs": 15,
     "scheduler_patience": 3,
     "scheduler_factor": 0.5,
-    "weighted_sampler": False,  # baseline used plain shuffle
-    "augmentation": False,      # baseline used normalize-only transforms
-    "face_detector": "haar",    # legacy — current baseline predates MTCNN swap
+    "weighted_sampler": False,  # baseline uses plain shuffle
+    "augmentation": False,      # baseline uses normalize-only transforms
+    "face_detector": "mtcnn",   # moved to MTCNN in Phase 2 — all 5 models share the same preprocessing
 }
 
 EFFICIENTNET_B4_CONFIG = {
