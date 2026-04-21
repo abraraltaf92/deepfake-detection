@@ -33,6 +33,14 @@ def main() -> None:
     partitioned = set(id(p) for p in head_params) | set(id(p) for p in backbone_params)
     assert all_params == partitioned, "head + backbone must partition all parameters"
 
+    # --- EfficientNet-B4 ---
+    from src.models import EfficientNetDeepfakeDetector
+    m = EfficientNetDeepfakeDetector(dropout=0.3).to(device)
+    assert isinstance(m, DeepfakeClassifier)
+    x = torch.randn(2, 4, 3, 224, 224, device=device)
+    logits = m(x)
+    assert logits.shape == (2, 2)
+
     print("ok")
 
 

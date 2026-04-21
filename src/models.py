@@ -76,8 +76,35 @@ class ResNetBinaryVideoClassifier(DeepfakeClassifier):
 # even before Phase 3 implementation.
 # =============================================================================
 class EfficientNetDeepfakeDetector(DeepfakeClassifier):
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError("Implemented in Phase 3 / Task 16")
+    """EfficientNet-B4 per-frame classifier; features mean-pooled across frames, then head.
+
+    Matches the mean-of-features + dropout + linear pattern used by the ResNet-18 baseline.
+    """
+
+    def __init__(self, dropout: float = 0.3, pretrained: bool = True) -> None:
+        super().__init__()
+        weights = tv_models.EfficientNet_B4_Weights.DEFAULT if pretrained else None
+        backbone = tv_models.efficientnet_b4(weights=weights)
+        in_features = backbone.classifier[1].in_features
+        backbone.classifier = nn.Identity()
+        self.backbone = backbone
+        self.head = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(in_features, 2),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C, H, W = x.shape
+        x = x.view(B * T, C, H, W)
+        feats = self.backbone(x)                            # (B*T, F)
+        feats = feats.view(B, T, -1).mean(dim=1)            # (B, F) temporal pool BEFORE head
+        return self.head(feats)                             # (B, 2)
+
+    def head_parameters(self) -> list[nn.Parameter]:
+        return list(self.head.parameters())
+
+    def backbone_parameters(self) -> list[nn.Parameter]:
+        return list(self.backbone.parameters())
 
 
 class R3D18DeepfakeDetector(DeepfakeClassifier):
