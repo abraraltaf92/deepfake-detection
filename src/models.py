@@ -108,8 +108,33 @@ class EfficientNetDeepfakeDetector(DeepfakeClassifier):
 
 
 class R3D18DeepfakeDetector(DeepfakeClassifier):
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError("Implemented in Phase 3 / Task 17")
+    """3D ResNet-18 from torchvision.models.video. Clip-level classifier.
+
+    Input:  (B, T, C, H, W) — transposed internally to (B, C, T, H, W) for r3d_18.
+    Output: (B, 2) binary logits.
+    """
+
+    def __init__(self, dropout: float = 0.3, pretrained: bool = True) -> None:
+        super().__init__()
+        import torchvision.models.video as video_models
+        weights = video_models.R3D_18_Weights.DEFAULT if pretrained else None
+        backbone = video_models.r3d_18(weights=weights)
+        in_features = backbone.fc.in_features
+        backbone.fc = nn.Identity()
+        self.backbone = backbone
+        self.head = nn.Sequential(nn.Dropout(dropout), nn.Linear(in_features, 2))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, T, C, H, W) → (B, C, T, H, W)
+        x = x.permute(0, 2, 1, 3, 4)
+        feats = self.backbone(x)   # (B, F)
+        return self.head(feats)
+
+    def head_parameters(self) -> list[nn.Parameter]:
+        return list(self.head.parameters())
+
+    def backbone_parameters(self) -> list[nn.Parameter]:
+        return list(self.backbone.parameters())
 
 
 class ViTDeepfakeDetector(DeepfakeClassifier):

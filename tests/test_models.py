@@ -41,6 +41,14 @@ def main() -> None:
     logits = m(x)
     assert logits.shape == (2, 2)
 
+    # --- R3D-18 ---
+    from src.models import R3D18DeepfakeDetector
+    m = R3D18DeepfakeDetector(dropout=0.3).to(device)
+    # R3D expects (B, C, T, H, W) internally; the model's forward accepts (B, T, C, H, W) and transposes.
+    x = torch.randn(2, 8, 3, 112, 112, device=device)
+    logits = m(x)
+    assert logits.shape == (2, 2)
+
     print("ok")
 
 
