@@ -35,6 +35,7 @@ CELEBDF_RAW_ROOT = RAW_ROOT / "celeb-df-v2"
 # --- Processed Data ---
 PROC_ROOT        = DATA_ROOT / "processed"
 FRAMES_ROOT      = PROC_ROOT / "ffpp_c23" / "frames224_binary"
+MTCNN_FRAMES_ROOT = PROC_ROOT / "ffpp_c23" / "frames224_mtcnn"
 CELEBDF_FRAMES   = PROC_ROOT / "celebdf_face_crops_224"
 RAFT_FRAMES_ROOT = PROC_ROOT / "ffpp_c23" / "frames224_raft16"
 INDEX_DIR        = PROC_ROOT / "ffpp_c23" / "splits"

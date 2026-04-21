@@ -6,6 +6,7 @@ work across Colab session restarts.
 """
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -111,6 +112,10 @@ def extract_batch(
         if n == num_frames:
             results["written"] += 1
         else:
+            # Partial extraction — remove the incomplete directory so next run
+            # either succeeds cleanly or fails at the same point consistently.
+            if out_dir.exists():
+                shutil.rmtree(out_dir, ignore_errors=True)
             results["failed"] += 1
     return results
 
@@ -123,12 +128,20 @@ def extract_face_frames_interpolated(
     img_size: int = 224,
     device: Optional[torch.device] = None,
 ) -> int:
-    """RAFT-interpolated frame extraction.
+    """RAFT-interpolated frame extraction. [BROKEN — see KNOWN ISSUES below]
 
-    Sample N/2 native frames uniformly, then RAFT-interpolate one midframe
-    between each adjacent pair, yielding N frames. Face-crop each with MTCNN.
+    KNOWN ISSUES (unaddressed in Phase 2; must be resolved in Phase 3 before
+    r3d18_raft training):
+        * `mid = a + 0.5 * flow` — RGB (3ch) cannot broadcast to flow (2ch); will crash.
+          Fix: use grid_sample warping OR replace with (a+b)/2 temporal averaging and
+          rename the function to reflect the simpler approach.
+        * RAFT inputs should be in [-1, 1] range, not [0, 1]; current code passes
+          [0, 1] without normalization, producing garbage flow.
+          Fix: apply Raft_Small_Weights.DEFAULT.transforms() to both frames.
+        * Off-by-one — produces (2*(n_native-1)+1)=15 real frames then pads the
+          last one; silent duplicate at the tail. Fix or document.
 
-    MPS is unsupported for RAFT here — caller should use Colab CUDA.
+    MPS is unsupported here — caller should use Colab CUDA.
     """
     from torchvision.models.optical_flow import raft_small, Raft_Small_Weights
 
