@@ -2518,7 +2518,10 @@ Replace the `EfficientNetDeepfakeDetector` placeholder with:
 
 ```python
 class EfficientNetDeepfakeDetector(DeepfakeClassifier):
-    """EfficientNet-B4 per-frame classifier; logits averaged across frames."""
+    """EfficientNet-B4 per-frame classifier; features mean-pooled across frames, then head.
+
+    Matches the mean-of-features + dropout + linear pattern used by the ResNet-18 baseline.
+    """
 
     def __init__(self, dropout: float = 0.3, pretrained: bool = True) -> None:
         super().__init__()
@@ -2535,12 +2538,15 @@ class EfficientNetDeepfakeDetector(DeepfakeClassifier):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C, H, W = x.shape
         x = x.view(B * T, C, H, W)
-        feats = self.backbone(x)
-        logits = self.head(feats)
-        return logits.view(B, T, 2).mean(dim=1)
+        feats = self.backbone(x)                            # (B*T, F)
+        feats = feats.view(B, T, -1).mean(dim=1)            # (B, F) temporal pool BEFORE head
+        return self.head(feats)                             # (B, 2)
 
-    def head_parameters(self): return self.head.parameters()
-    def backbone_parameters(self): return self.backbone.parameters()
+    def head_parameters(self) -> list[nn.Parameter]:
+        return list(self.head.parameters())
+
+    def backbone_parameters(self) -> list[nn.Parameter]:
+        return list(self.backbone.parameters())
 ```
 
 - [ ] **Step 16.3: Run test_models — should pass**
@@ -2578,7 +2584,11 @@ assert logits.shape == (2, 2)
 
 ```python
 class R3D18DeepfakeDetector(DeepfakeClassifier):
-    """3D ResNet-18 from torchvision.models.video. Clip-level classifier."""
+    """3D ResNet-18 from torchvision.models.video. Clip-level classifier.
+
+    Input:  (B, T, C, H, W) — transposed internally to (B, C, T, H, W) for r3d_18.
+    Output: (B, 2) binary logits.
+    """
 
     def __init__(self, dropout: float = 0.3, pretrained: bool = True) -> None:
         super().__init__()
@@ -2596,8 +2606,11 @@ class R3D18DeepfakeDetector(DeepfakeClassifier):
         feats = self.backbone(x)   # (B, F)
         return self.head(feats)
 
-    def head_parameters(self): return self.head.parameters()
-    def backbone_parameters(self): return self.backbone.parameters()
+    def head_parameters(self) -> list[nn.Parameter]:
+        return list(self.head.parameters())
+
+    def backbone_parameters(self) -> list[nn.Parameter]:
+        return list(self.backbone.parameters())
 ```
 
 - [ ] **Step 17.3: Run + Commit**
@@ -2645,9 +2658,10 @@ assert logits.shape == (2, 2)
 
 ```python
 class ViTDeepfakeDetector(DeepfakeClassifier):
-    """timm ViT backbone, per-frame → mean-pool logits."""
+    """timm ViT backbone, applied per-frame, feature-mean-pooled, then head."""
 
-    def __init__(self, model_name: str = "vit_base_patch16_224", dropout: float = 0.2, pretrained: bool = True) -> None:
+    def __init__(self, model_name: str = "vit_base_patch16_224",
+                 dropout: float = 0.2, pretrained: bool = True) -> None:
         super().__init__()
         import timm
         self.backbone = timm.create_model(model_name, pretrained=pretrained, num_classes=0)
@@ -2658,11 +2672,14 @@ class ViTDeepfakeDetector(DeepfakeClassifier):
         B, T, C, H, W = x.shape
         x = x.view(B * T, C, H, W)
         feats = self.backbone(x)
-        logits = self.head(feats)
-        return logits.view(B, T, 2).mean(dim=1)
+        feats = feats.view(B, T, -1).mean(dim=1)      # temporal pool BEFORE head
+        return self.head(feats)
 
-    def head_parameters(self): return self.head.parameters()
-    def backbone_parameters(self): return self.backbone.parameters()
+    def head_parameters(self) -> list[nn.Parameter]:
+        return list(self.head.parameters())
+
+    def backbone_parameters(self) -> list[nn.Parameter]:
+        return list(self.backbone.parameters())
 ```
 
 - [ ] **Step 18.4: Run + Commit**
@@ -2695,9 +2712,10 @@ class R3D18RAFTDeepfakeDetector(R3D18DeepfakeDetector):
     """Identical architecture to R3D18DeepfakeDetector.
 
     The difference is *what frames you feed it*: a DataLoader pointed at
-    configs.paths.RAFT_FRAMES_ROOT will provide 16 RAFT-interpolated frames,
-    whereas a DataLoader pointed at FRAMES_ROOT provides 16 natively sampled
-    frames. Kept as a separate class for clarity in leaderboards + configs.
+    configs.paths.RAFT_FRAMES_ROOT supplies 16 RAFT-interpolated frames,
+    whereas a DataLoader pointed at FRAMES_ROOT/MTCNN_FRAMES_ROOT supplies
+    natively sampled frames. Kept as a separate class so leaderboard rows and
+    configs.experiments entries can disambiguate.
     """
     pass
 ```
