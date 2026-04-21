@@ -40,20 +40,42 @@ def plot_confusion_matrix(y_true, y_pred, labels: Iterable[str]) -> plt.Figure:
 
 
 def plot_training_history(history: dict) -> plt.Figure:
-    """Two-row plot: losses on top, val accuracy on bottom, with stage boundary marked."""
-    s1 = history["stage1"]; s2 = history["stage2"]
-    e1 = len(s1["train_loss"])
-    x_all = list(range(1, e1 + len(s2["train_loss"]) + 1))
+    """Two-row plot: losses on top, val accuracy on bottom.
+
+    Supports both formats:
+      * Two-stage (train_two_stage): {"stage1": {...}, "stage2": {...}} each with
+        train_loss / val_loss / val_acc lists — stage boundary is drawn as a dashed line.
+      * Single-stage (train_single_stage): flat {"train_loss": [...], "val_loss": [...],
+        "val_acc": [...], "val_f1": [...]} — no stage boundary.
+    """
+    if "stage1" in history and "stage2" in history:
+        s1 = history["stage1"]; s2 = history["stage2"]
+        e1 = len(s1["train_loss"])
+        train_loss = s1["train_loss"] + s2["train_loss"]
+        val_loss   = s1["val_loss"]   + s2["val_loss"]
+        val_acc    = s1["val_acc"]    + s2["val_acc"]
+        stage_boundary = e1 + 0.5
+        x_label = "epoch (stage1 | stage2)"
+    else:
+        train_loss = history["train_loss"]
+        val_loss   = history["val_loss"]
+        val_acc    = history["val_acc"]
+        stage_boundary = None
+        x_label = "epoch"
+
+    x_all = list(range(1, len(train_loss) + 1))
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
-    ax1.plot(x_all, s1["train_loss"] + s2["train_loss"], label="train loss")
-    ax1.plot(x_all, s1["val_loss"]   + s2["val_loss"],   label="val loss")
-    ax1.axvline(e1 + 0.5, color="gray", linestyle="--", alpha=0.6, label="stage boundary")
+    ax1.plot(x_all, train_loss, label="train loss")
+    ax1.plot(x_all, val_loss,   label="val loss")
+    if stage_boundary is not None:
+        ax1.axvline(stage_boundary, color="gray", linestyle="--", alpha=0.6, label="stage boundary")
     ax1.set_ylabel("loss"); ax1.legend(); ax1.grid(alpha=0.3)
 
-    ax2.plot(x_all, s1["val_acc"] + s2["val_acc"], label="val acc", color="green")
-    ax2.axvline(e1 + 0.5, color="gray", linestyle="--", alpha=0.6)
-    ax2.set_ylabel("val accuracy"); ax2.set_xlabel("epoch (stage1 | stage2)")
+    ax2.plot(x_all, val_acc, label="val acc", color="green")
+    if stage_boundary is not None:
+        ax2.axvline(stage_boundary, color="gray", linestyle="--", alpha=0.6)
+    ax2.set_ylabel("val accuracy"); ax2.set_xlabel(x_label)
     ax2.grid(alpha=0.3); ax2.legend()
     fig.tight_layout()
     return fig
