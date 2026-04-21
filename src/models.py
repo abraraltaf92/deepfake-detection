@@ -138,8 +138,28 @@ class R3D18DeepfakeDetector(DeepfakeClassifier):
 
 
 class ViTDeepfakeDetector(DeepfakeClassifier):
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError("Implemented in Phase 3 / Task 18")
+    """timm ViT backbone, applied per-frame, feature-mean-pooled, then head."""
+
+    def __init__(self, model_name: str = "vit_base_patch16_224",
+                 dropout: float = 0.2, pretrained: bool = True) -> None:
+        super().__init__()
+        import timm
+        self.backbone = timm.create_model(model_name, pretrained=pretrained, num_classes=0)
+        in_features = self.backbone.num_features
+        self.head = nn.Sequential(nn.Dropout(dropout), nn.Linear(in_features, 2))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C, H, W = x.shape
+        x = x.view(B * T, C, H, W)
+        feats = self.backbone(x)
+        feats = feats.view(B, T, -1).mean(dim=1)      # temporal pool BEFORE head
+        return self.head(feats)
+
+    def head_parameters(self) -> list[nn.Parameter]:
+        return list(self.head.parameters())
+
+    def backbone_parameters(self) -> list[nn.Parameter]:
+        return list(self.backbone.parameters())
 
 
 class R3D18RAFTDeepfakeDetector(DeepfakeClassifier):

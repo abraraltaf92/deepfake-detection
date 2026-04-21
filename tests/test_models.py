@@ -49,6 +49,13 @@ def main() -> None:
     logits = m(x)
     assert logits.shape == (2, 2)
 
+    # --- ViT ---
+    from src.models import ViTDeepfakeDetector
+    m = ViTDeepfakeDetector(dropout=0.2).to(device)
+    x = torch.randn(2, 4, 3, 224, 224, device=device)
+    logits = m(x)
+    assert logits.shape == (2, 2)
+
     print("ok")
 
 
