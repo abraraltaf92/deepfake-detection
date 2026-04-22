@@ -37,6 +37,7 @@ EFFICIENTNET_B4_CONFIG = {
     **BASE_CONFIG,
     "model": "efficientnet_b4",
     "train_mode": "two_stage",
+    "batch_size": 8,         # 16 frames × batch=8 fits Colab L4 (22 GB) during stage-2 full fine-tune
     "lr_stage1": 1e-3,
     "lr_stage2": 1e-4,
     "epochs_stage1": 3,
@@ -47,6 +48,7 @@ R3D18_CONFIG = {
     **BASE_CONFIG,
     "model": "r3d18",
     "train_mode": "two_stage",
+    "batch_size": 8,         # 16 frames × batch=8 on L4
     "lr_stage1": 1e-3,
     "lr_stage2": 1e-4,
     "epochs_stage1": 3,
@@ -57,6 +59,7 @@ VIT_CONFIG = {
     **BASE_CONFIG,
     "model": "vit_base_patch16_224",
     "train_mode": "two_stage",
+    "batch_size": 8,         # 16 frames × batch=8 on L4 — ViT attention is memory-heavy
     "lr_stage1": 5e-4,
     "lr_stage2": 5e-5,
     "epochs_stage1": 3,
@@ -67,7 +70,8 @@ R3D18_RAFT_CONFIG = {
     **BASE_CONFIG,
     "model": "r3d18_raft",
     "train_mode": "two_stage",
-    "num_frames": 16,     # RAFT-interpolated, same count
+    "num_frames": 16,        # RAFT-interpolated, same count
+    "batch_size": 8,
     "lr_stage1": 1e-3,
     "lr_stage2": 1e-4,
     "epochs_stage1": 3,
