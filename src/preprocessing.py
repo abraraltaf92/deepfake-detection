@@ -120,30 +120,69 @@ def extract_batch(
     return results
 
 
-# -------- RAFT optical-flow-interpolated frames (Phase 3 uses this for r3d18_raft model) --------
+# -------- RAFT optical-flow-interpolated frames --------
+_raft_cache: dict = {}
+
+
+def _get_raft(device):
+    """Lazy singleton for the small RAFT network + its preprocessing transforms."""
+    from torchvision.models.optical_flow import raft_small, Raft_Small_Weights
+    key = str(device)
+    if key not in _raft_cache:
+        weights = Raft_Small_Weights.DEFAULT
+        net = raft_small(weights=weights, progress=False).to(device).eval()
+        _raft_cache[key] = (net, weights.transforms())
+    return _raft_cache[key]
+
+
+def _warp_half(img: torch.Tensor, flow: torch.Tensor) -> torch.Tensor:
+    """Warp `img` by half of `flow` using grid_sample — approximates the midframe.
+
+    img:  (B, 3, H, W) in [0, 1]
+    flow: (B, 2, H, W) displacement in pixels (dx, dy)
+    returns: warped image (B, 3, H, W) in [0, 1]
+    """
+    import torch.nn.functional as F
+    B, C, H, W = img.shape
+    ys, xs = torch.meshgrid(
+        torch.linspace(-1.0, 1.0, H, device=img.device),
+        torch.linspace(-1.0, 1.0, W, device=img.device),
+        indexing="ij",
+    )
+    base_grid = torch.stack([xs, ys], dim=-1).unsqueeze(0).expand(B, -1, -1, -1).contiguous()
+    flow_norm = (0.5 * flow).permute(0, 2, 3, 1).contiguous()
+    flow_norm[..., 0] *= 2.0 / max(W - 1, 1)
+    flow_norm[..., 1] *= 2.0 / max(H - 1, 1)
+    grid = base_grid + flow_norm
+    return F.grid_sample(img, grid, mode="bilinear", padding_mode="border", align_corners=True)
+
+
 def extract_face_frames_interpolated(
     video_path: Path,
     out_dir: Path,
     num_frames: int = 16,
     img_size: int = 224,
     device: Optional[torch.device] = None,
+    raft_size: int = 256,
 ) -> int:
-    """RAFT-interpolated frame extraction. [BROKEN — see KNOWN ISSUES below]
+    """RAFT optical-flow interpolated frame extraction.
 
-    KNOWN ISSUES (unaddressed in Phase 2; must be resolved in Phase 3 before
-    r3d18_raft training):
-        * `mid = a + 0.5 * flow` — RGB (3ch) cannot broadcast to flow (2ch); will crash.
-          Fix: use grid_sample warping OR replace with (a+b)/2 temporal averaging and
-          rename the function to reflect the simpler approach.
-        * RAFT inputs should be in [-1, 1] range, not [0, 1]; current code passes
-          [0, 1] without normalization, producing garbage flow.
-          Fix: apply Raft_Small_Weights.DEFAULT.transforms() to both frames.
-        * Off-by-one — produces (2*(n_native-1)+1)=15 real frames then pads the
-          last one; silent duplicate at the tail. Fix or document.
+    Samples `(num_frames // 2 + 1)` native frames uniformly from the video,
+    computes RAFT optical flow between each adjacent pair, warps the first
+    frame of each pair by half the flow to produce a synthetic midframe, and
+    interleaves native + midframes. The resulting sequence is truncated to
+    exactly `num_frames` (default 16) and each frame is face-cropped with MTCNN.
 
-    MPS is unsupported here — caller should use Colab CUDA.
+    Implementation notes:
+      * RAFT is run on frames downsized to `raft_size × raft_size` for speed
+        and to satisfy RAFT's divisibility-by-8 input requirement; the computed
+        flow is rescaled back to the native frame size for warping.
+      * Input normalisation for RAFT is handled by the model's own transforms
+        (Raft_Small_Weights.DEFAULT.transforms()), which map [0, 1] → [-1, 1].
+      * CUDA-only. Raises RuntimeError on MPS.
+      * Idempotent: skips if `out_dir` already contains `num_frames` jpgs.
     """
-    from torchvision.models.optical_flow import raft_small, Raft_Small_Weights
+    import torch.nn.functional as F
 
     device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
     if device.type == "mps":
@@ -153,45 +192,67 @@ def extract_face_frames_interpolated(
     if is_already_extracted(out_dir, num_frames):
         return num_frames
 
+    # 1) Read native frames uniformly from the video
     cap = cv2.VideoCapture(str(video_path))
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if total <= 0:
         cap.release()
         return 0
 
-    n_native = num_frames // 2
+    n_native = (num_frames // 2) + 1          # e.g. 9 for num_frames=16
     sample_idxs = np.linspace(0, total - 1, n_native).astype(int)
     native_frames = []
     for fidx in sample_idxs:
         cap.set(cv2.CAP_PROP_POS_FRAMES, fidx)
         ok, frame = cap.read()
-        if not ok: continue
+        if not ok:
+            continue
         native_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     cap.release()
     if len(native_frames) < 2:
         return 0
 
-    # Build interpolated sequence: [n0, interp(n0,n1), n1, interp(n1,n2), n2, ...]
-    raft = raft_small(weights=Raft_Small_Weights.DEFAULT, progress=False).to(device).eval()
-    mtcnn = get_mtcnn(device=device, img_size=img_size)
-
-    def _to_tensor(img: np.ndarray) -> torch.Tensor:
-        t = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
-        return t.unsqueeze(0).to(device)
-
-    out_frames = []
+    # 2) Compute RAFT flow between adjacent pairs + warp for midframes
+    raft_net, raft_tfm = _get_raft(device)
+    out_frames: list = []
     with torch.no_grad():
         for i in range(len(native_frames) - 1):
-            out_frames.append(native_frames[i])
-            a, b = _to_tensor(native_frames[i]), _to_tensor(native_frames[i + 1])
-            flow = raft(a, b)[-1]
-            mid = a + 0.5 * flow  # crude midpoint from flow; acceptable as "interpolation proxy"
-            mid_img = (mid.squeeze(0).clamp(0, 1).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
-            out_frames.append(mid_img)
+            a_raw = native_frames[i]
+            b_raw = native_frames[i + 1]
+            H, W = a_raw.shape[:2]
+
+            # Resize both to raft_size for RAFT inference (uint8 CHW)
+            a_small = cv2.resize(a_raw, (raft_size, raft_size), interpolation=cv2.INTER_AREA)
+            b_small = cv2.resize(b_raw, (raft_size, raft_size), interpolation=cv2.INTER_AREA)
+            a_t = torch.from_numpy(a_small).permute(2, 0, 1).unsqueeze(0)
+            b_t = torch.from_numpy(b_small).permute(2, 0, 1).unsqueeze(0)
+
+            # RAFT transforms normalise to [-1, 1] and cast to float
+            a_in, b_in = raft_tfm(a_t, b_t)
+            a_in, b_in = a_in.to(device), b_in.to(device)
+            flow_small = raft_net(a_in, b_in)[-1]   # (1, 2, raft_size, raft_size) in pixels
+
+            # Rescale flow back to native resolution
+            flow_full = F.interpolate(flow_small, size=(H, W), mode="bilinear", align_corners=True)
+            flow_full[:, 0] *= (W / raft_size)
+            flow_full[:, 1] *= (H / raft_size)
+
+            # Warp the original-resolution a_raw (in [0, 1]) by half the flow
+            a_float = torch.from_numpy(a_raw).permute(2, 0, 1).unsqueeze(0).float().to(device) / 255.0
+            mid = _warp_half(a_float, flow_full)
+            mid_np = (mid.squeeze(0).clamp(0, 1).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+
+            out_frames.append(a_raw)
+            out_frames.append(mid_np)
         out_frames.append(native_frames[-1])
 
-    # Truncate / pad to exactly num_frames
-    out_frames = out_frames[:num_frames] + [out_frames[-1]] * max(0, num_frames - len(out_frames))
+    # 3) Truncate / pad to exactly num_frames
+    out_frames = out_frames[:num_frames]
+    while len(out_frames) < num_frames and out_frames:
+        out_frames.append(out_frames[-1])
+
+    # 4) Face-crop each frame with MTCNN; center-crop fallback if no face detected
+    mtcnn = get_mtcnn(device=device, img_size=img_size)
 
     out_dir.mkdir(parents=True, exist_ok=True)
     for i, frame in enumerate(out_frames):
