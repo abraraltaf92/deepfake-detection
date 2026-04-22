@@ -1,0 +1,23 @@
+% ============================================================
+% Paper section: Anomaly Detection Mechanism
+% Replaces the current vague IV.E in CS_668_Technical_Paper draft.
+% Intended location: Methodology section (IV), after the individual
+% model-architecture subsections.
+% ============================================================
+
+\subsection{Anomaly Detection Mechanism}
+\label{sec:anomaly}
+
+We frame binary deepfake detection as a \textit{supervised anomaly detection} problem. Real human faces, captured under natural conditions, occupy a high-dimensional manifold of plausible appearance and motion. Every manipulation technique — face-swap, face-reenactment, neural rendering, expression transfer — introduces subtle deviations from that manifold: traces that are imperceptible to casual human inspection but, by construction, cannot be eliminated entirely without also removing the manipulation itself. Our detection framework is designed to identify these deviations. Each of the five models learns a complementary signature of what an anomaly looks like, and the ensemble combines them into a single soft-vote score representing the probability that the input lies off the real-face manifold.
+
+We distinguish three classes of anomaly that our framework targets explicitly.
+
+\textbf{Spatial anomalies} are the artifacts of single-frame appearance: inconsistent skin-tone gradients around blending boundaries, over-smoothed texture in generated regions, mismatched lighting between the face and the surrounding scene, and compression-code residues introduced by the generator's decoder. These are captured by the per-frame 2D-CNN backbones. \textbf{ResNet-18} (the baseline) learns local spatial anomalies through its residual feature hierarchy; \textbf{EfficientNet-B4} learns the same class of anomalies at higher fidelity through its compound-scaled MBConv blocks with squeeze-excitation, which re-weight channels to emphasise regions with informative inter-channel correlations.
+
+\textbf{Global consistency anomalies} concern long-range relationships inside a single frame — the relative pose of eyes versus mouth, the alignment between nose and chin, the ratio of facial landmarks — which a local convolutional receptive field can miss. \textbf{ViT-B/16} targets this class through self-attention over $14 \times 14$ image patches, producing a holistic feature vector that captures whether the facial geometry as a whole is internally consistent, regardless of which local pixels look plausible.
+
+\textbf{Temporal-motion anomalies} concern inconsistencies across the 16-frame clip: jitter in lip-sync, discontinuous eye-blink patterns, flickering texture on a cheek between consecutive frames, and unrealistic optical flow around the jawline. Frame-level detectors are structurally blind to these. We cover them with two complementary clip-level models. \textbf{R3D-18} applies three-dimensional convolutions over the $(T, H, W)$ volume, learning spatiotemporal filters that fire on implausible motion patterns. \textbf{R3D-18 + RAFT} further amplifies this by feeding the 3D CNN a sequence of frames interpolated via the RAFT optical-flow model; the interpolated frames make inter-frame motion-flow artifacts visible to the network as spatial content, effectively converting a temporal anomaly into a spatial one that the 3D convolutions can detect directly.
+
+The ensemble aggregates these five anomaly signatures through equal-weight soft-voting (Section~\ref{sec:ensemble}). Because the five models detect different anomaly types, their errors are partially decorrelated: a carefully-constructed deepfake that evades the per-frame detectors by matching ImageNet texture statistics may still be caught by the 3D convolution if its motion pattern is off, and vice versa. The ensemble is therefore not merely a smoothing of predictions but a \textit{multi-view anomaly detector}.
+
+To make the detected anomalies interpretable, we apply Grad-CAM~\cite{selvaraju2017gradcam} to the final convolutional stage of EfficientNet-B4, producing heat-map overlays that localise the pixels most responsible for the ``fake'' logit. These visualisations confirm, post-hoc, whether the model is attending to anomaly regions (blending boundaries, mouth interior, eye sockets) or to spurious cues (background, lighting). Systematic review of Grad-CAM panels across per-manipulation subsets reveals which anomaly types each manipulation family exposes most strongly, providing both a sanity check on the model and an interpretability narrative suitable for downstream use in content-moderation workflows.

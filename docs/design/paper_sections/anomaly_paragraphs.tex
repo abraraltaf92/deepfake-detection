@@ -1,0 +1,42 @@
+% ============================================================
+% Paper passages (Abstract + Introduction) threading the anomaly
+% detection framing through the paper's opening.
+% Paste these to replace the corresponding blocks in the draft.
+% ============================================================
+
+
+%% ------------------------------------------------------------
+%% ABSTRACT (replaces the template placeholder)
+%% ------------------------------------------------------------
+
+\begin{abstract}
+Deepfake detection is fundamentally an anomaly-detection problem: real faces occupy a manifold of plausible appearance and motion, and every face-manipulation technique introduces deviations from that manifold. Single-architecture detectors typically capture only one class of anomaly and consequently fail to transfer across datasets. We address this by framing detection as multi-view anomaly aggregation over five independently-trained models spanning three anomaly classes: spatial (ResNet-18 and EfficientNet-B4), global-consistency (Vision Transformer ViT-B/16), and temporal-motion (R3D-18, with and without RAFT optical-flow interpolation). Each model is trained on FaceForensics++ C23 under an identity-component-based split, and their per-video anomaly scores are combined via equal-weight soft voting. We evaluate in-dataset performance on FaceForensics++, zero-shot cross-dataset transfer on Celeb-DF v2, and per-manipulation breakdown across the five FaceForensics++ fake families. Grad-CAM overlays on the final convolutional stage of EfficientNet-B4 provide pixel-level anomaly localisation, confirming that detection attends to blending boundaries and manipulation-prone facial regions rather than spurious background cues. The ensemble's FaceForensics++ \(\rightarrow\) Celeb-DF generalisation gap quantifies the degree to which the learned anomaly signatures are dataset-specific versus transferable, and is the paper's primary empirical contribution.
+\end{abstract}
+
+
+%% ------------------------------------------------------------
+%% INTRODUCTION (augments the existing section with anomaly-framing paragraphs)
+%% Add these three paragraphs immediately after the current introductory paragraphs
+%% that discuss CNN-based detection and before the contributions list.
+%% ------------------------------------------------------------
+
+A productive lens on deepfake detection is to view it as a \textit{multi-view anomaly detection} problem. Real human faces inhabit a manifold in image and motion space that is continuous, internally consistent, and shaped by the physics of light, skin, and muscle. Generative methods — whether they swap identities, transfer expressions, or synthesise speech-driven mouth motion — are structurally incapable of reproducing this manifold exactly. They leave traces: inconsistencies in texture and lighting (spatial anomalies), misaligned relationships between facial landmarks (global consistency anomalies), and incoherent motion patterns across frames (temporal-motion anomalies). A detection model can therefore be understood as a classifier of manifold deviations, where the choice of architecture determines which class of deviation the model is sensitive to.
+
+This perspective motivates the use of multiple, complementary detectors rather than a single model. A per-frame 2D CNN is specialised for spatial-texture anomalies but structurally blind to motion artifacts. A 3D CNN captures motion but at a coarser spatial resolution. A Vision Transformer sees global relationships through attention but may miss fine-grained local cues. A hybrid that feeds optical-flow-interpolated frames into a 3D CNN converts a class of temporal anomalies into spatial ones visible to the same network. No single family dominates on every anomaly type, and recent cross-dataset studies corroborate this: models tend to overfit whichever anomaly class is most prevalent in their training data and fail on unseen data distributions where other anomaly classes dominate \cite{korshunov2022generalization, wang2023crossdf}.
+
+In this work we construct five detectors that together cover the three major anomaly classes, train each on FaceForensics++ C23 under a leakage-free identity split, and combine their per-video scores with equal-weight soft voting. The headline empirical question is whether this multi-view ensemble generalises to a disjoint test distribution (Celeb-DF v2) more reliably than any single detector, and whether the remaining generalisation gap can be explained post-hoc via Grad-CAM anomaly localisation.
+
+
+%% ------------------------------------------------------------
+%% CONTRIBUTIONS (replaces the existing bullet list with an anomaly-framed version)
+%% ------------------------------------------------------------
+
+The main contributions of this work are summarised as follows:
+
+\begin{itemize}
+    \item A framing of binary deepfake detection as multi-view anomaly detection, identifying three complementary anomaly classes (spatial, global-consistency, temporal-motion) and mapping each to an appropriate architectural family.
+    \item A five-model detection pipeline implementing this framing: ResNet-18 and EfficientNet-B4 for spatial anomalies, ViT-B/16 for global-consistency anomalies, and R3D-18 with and without RAFT optical-flow interpolation for temporal-motion anomalies, trained under a shared MTCNN-based preprocessing pipeline on FaceForensics++ C23 with an identity-component-based 70/15/15 split.
+    \item An equal-weight soft-vote ensemble that combines the five anomaly signatures, evaluated in-dataset on FaceForensics++ and zero-shot on Celeb-DF v2, with the FaceForensics++ \(\rightarrow\) Celeb-DF generalisation gap reported per model and for the ensemble.
+    \item A per-manipulation anomaly breakdown across the five FaceForensics++ fake families (Deepfakes, Face2Face, FaceSwap, NeuralTextures, FaceShifter), revealing which anomaly classes each manipulation technique exposes most strongly.
+    \item Grad-CAM anomaly-localisation overlays on EfficientNet-B4's final convolutional stage, providing pixel-level interpretability that confirms the model attends to manipulation-prone facial regions rather than spurious cues.
+\end{itemize}
