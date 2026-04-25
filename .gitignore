@@ -14,12 +14,19 @@ logs/
 *.jpg
 *.png
 *.jpeg
+# Exception: committed docs diagrams (architecture, etc.)
+!docs/**/*.png
+!docs/**/*.jpg
+!docs/**/*.jpeg
 
 # === Python ===
 __pycache__/
 *.pyc
 *.pyo
 .ipynb_checkpoints/
+.venv/
+venv/
+env/
 
 # === Credentials & Secrets ===
 .env

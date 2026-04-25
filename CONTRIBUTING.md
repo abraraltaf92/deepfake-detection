@@ -25,10 +25,12 @@ main (protected — requires PR + 1 approval)
 
 #### a) Create a GitHub Personal Access Token
 
-1. Go to [GitHub Settings → Developer Settings → Personal Access Tokens → Tokens (classic)](https://github.com/settings/tokens)
-2. Click **"Generate new token (classic)"**
-3. Give it a name (e.g., `colab-access`)
-4. Select scopes: `repo` (full control of private repositories)
+1. Go to [GitHub Settings → Developer Settings → Personal Access Tokens → Fine-grained tokens](https://github.com/settings/personal-access-tokens/new)
+2. Give it a name (e.g., `colab-access`), set expiration to 90 days
+3. Under **Repository access**, select **"Only select repositories"** → choose `deepfake-detection`
+4. Under **Permissions → Repository permissions**, set:
+   - **Contents** → **Read and write**
+   - **Pull requests** → **Read and write**
 5. Click **Generate token**
 6. **Copy and save the token** — you won't see it again
 
@@ -45,17 +47,22 @@ from google.colab import drive
 drive.mount('/content/drive')
 
 # Clone or pull the repo
-REPO_URL = "https://<YOUR_TOKEN>@github.com/<username>/deepfake-detection.git"
-REPO_DIR = "/content/drive/MyDrive/deepfake-detection"
+# Clone the repo (use /content, NOT Drive — cloning to Drive can be slow/buggy)
+TOKEN = "<YOUR_TOKEN>"
+REPO_DIR = "/content/deepfake-detection"
 
 if not os.path.exists(REPO_DIR):
-    !git clone {REPO_URL} {REPO_DIR}
+    !git clone https://abraraltaf92:{TOKEN}@github.com/abraraltaf92/deepfake-detection.git {REPO_DIR}
 else:
     !cd {REPO_DIR} && git pull origin main
 
 # Set your Git identity
 !cd {REPO_DIR} && git config user.name "Your Name"
 !cd {REPO_DIR} && git config user.email "your.email@example.com"
+
+# Add repo to Python path so configs work
+import sys
+sys.path.insert(0, REPO_DIR)
 ```
 
 > ⚠️ **Never commit your token to the repo.** Replace `<YOUR_TOKEN>` each session or store it in a Colab secret.
@@ -101,14 +108,14 @@ If your branch doesn't exist yet:
 # Commit with a descriptive message
 !cd {REPO_DIR} && git commit -m "Add face detection with 20% margin cropping to preprocessing"
 
-# Push to your branch
-!cd {REPO_DIR} && git push origin dev/yourname
+# Push to your branch (use token URL for private repo)
+!cd {REPO_DIR} && git push https://abraraltaf92:{TOKEN}@github.com/abraraltaf92/deepfake-detection.git dev/yourname
 ```
 
 **Option B: Use Colab's Built-in GitHub Save**
 
 1. Go to **File → Save a copy in GitHub**
-2. Select the repository: `<username>/deepfake-detection`
+2. Select the repository: `abraraltaf92/deepfake-detection`
 3. Select your branch: `dev/yourname` — **NEVER select `main`**
 4. **Edit the commit message** to describe what you changed
 5. Update the file path to match the repo structure (e.g., `notebooks/02_eda.ipynb`)
@@ -120,7 +127,7 @@ If your branch doesn't exist yet:
 
 When your work is ready for review:
 
-1. Go to the [GitHub repository](https://github.com/<username>/deepfake-detection)
+1. Go to the [GitHub repository](https://github.com/abraraltaf92/deepfake-detection)
 2. You'll see a banner: *"dev/yourname had recent pushes"* → Click **"Compare & pull request"**
 3. Set:
    - **Base:** `main`
