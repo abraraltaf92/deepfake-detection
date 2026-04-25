@@ -20,20 +20,9 @@ Binary deepfake detection with a focus on building robust models that **generali
 
 ## Current Phase
 
-**Phase 2: Advanced Model Architectures**
+**Phase 3 complete: Multi-View Anomaly Detection Ensemble**
 
-- Exploring 3D CNN + LSTM for temporal feature learning
-- Investigating attention mechanisms and Vision Transformers (ViT)
-- Target: improve cross-dataset generalization beyond baseline ResNet-18
-
----
-
-## Weekly Goals
-
-- [ ] Implement 3D CNN with temporal pooling
-- [ ] Research ViT-based approaches for frame-level deepfake detection
-- [ ] Begin cross-dataset evaluation pipeline (train on FF++, test on CelebDF)
-- [ ] Document model experiment results
+Five complementary detectors targeting three anomaly classes (spatial, global-consistency, temporal-motion), aggregated via equal-weight soft-vote. All models trained on FaceForensics++ C23, zero-shot evaluated on Celeb-DF v2.
 
 ---
 
@@ -46,27 +35,47 @@ Binary deepfake detection with a focus on building robust models that **generali
 | 03-05-2026 | Preprocessing pipeline (frame extraction, face detection, sampling) | ✅ Done |
 | 03-15-2026 | Baseline ResNet-18 binary classifier trained | ✅ Done |
 | 03-23-2026 | GitHub repo setup with version control workflow | ✅ Done |
-| XX-XX-2026 | Advanced model exploration (3D CNN, LSTM, ViT) | 🔄 In Progress |
-| XX-XX-2026 | Cross-dataset generalization evaluation | ⬚ Upcoming |
+| 04-21-2026 | ResNet-18 baseline retrained on full MTCNN frames (A2 single-stage recipe) | ✅ Done |
+| 04-22-2026 | EfficientNet-B4, R3D-18, ViT-B/16 trained on FF++ C23 | ✅ Done |
+| 04-23-2026 | RAFT optical-flow extraction + R3D-18+RAFT trained | ✅ Done |
+| 04-24-2026 | Cross-dataset Celeb-DF v2 zero-shot eval + 5-model ensemble + Grad-CAM | ✅ Done |
 
 ---
 
 ## Model Performance
 
-### In-Dataset (FaceForensics++ C23)
+### In-Dataset (FaceForensics++ C23 test, 900 videos)
 
-| Model | Accuracy | F1 Score | Val Accuracy | Epochs | Notes |
-|-------|----------|----------|--------------|--------|-------|
-| ResNet-18 (baseline) | 86% | 0.9333 | 89.67% | 15 | Class-weighted loss, 16 frames/video |
-| 3D CNN + LSTM | — | — | — | — | In progress |
-| ViT-based | — | — | — | — | Planned |
+| Model | Anomaly Class | Accuracy | F1 Score | AUC | Train Time |
+|-------|---------------|---------:|---------:|----:|-----------:|
+| ResNet-18 (baseline) | Spatial | 0.9989 | 0.9993 | 0.9999 | — |
+| EfficientNet-B4 | Spatial (high-cap) | 0.9944 | 0.9967 | **1.0000** | 148.8 min |
+| R3D-18 | Temporal-motion | 0.9756 | 0.9852 | 0.9991 | 35.9 min |
+| ViT-B/16 | Global consistency | 0.9700 | 0.9817 | 0.9992 | 72.1 min |
+| R3D-18 + RAFT | Motion-flow | 0.9833 | 0.9899 | 0.9993 | 130.1 min |
+| **Ensemble (5-model soft-vote)** | All three | **0.9989** | **0.9993** | **1.0000** | n/a |
 
-### Cross-Dataset Generalization
+All 5 architectures saturate FF++ test (AUC ≥ 0.999). In-dataset metrics do not differentiate models — see cross-dataset table below for the real story.
 
-| Model | Trained On | Tested On | Accuracy | F1 Score | Notes |
-|-------|------------|-----------|----------|----------|-------|
-| ResNet-18 (baseline) | FF++ C23 | CelebDF | — | — | Pending |
-| ResNet-18 (baseline) | FF++ C23 | DFDC | — | — | Pending |
+### Cross-Dataset Generalization (Zero-Shot Celeb-DF v2, 6,528 videos)
+
+| Model | FF++ AUC | Celeb-DF AUC | Δ Generalization Gap |
+|-------|---------:|-------------:|---------------------:|
+| EfficientNet-B4 | 1.0000 | 0.8173 | 0.1827 |
+| ResNet-18 | 0.9999 | 0.8209 | 0.1790 |
+| R3D-18 | 0.9991 | 0.8413 | 0.1577 |
+| R3D-18 + RAFT | 0.9993 | 0.8744 | 0.1249 |
+| ViT-B/16 | 0.9992 | 0.8777 | 0.1216 |
+| **Ensemble (5-model)** | **1.0000** | **0.9056** | **0.0944** |
+
+**Key findings:**
+
+- **EfficientNet-B4 ranks first in-dataset, last cross-dataset** — high capacity overfits FF++ compression artifacts.
+- **Anomaly class predicts transferability:** spatial-only models drop hardest; motion-flow (R3D+RAFT) and global-consistency (ViT) transfer best.
+- **The 5-model ensemble shrinks the generalization gap by 22%** (0.1216 → 0.0944) over the strongest single model, validating the multi-view anomaly-detection framing.
+- **Grad-CAM** on EfficientNet-B4's final convolutional stage confirms attention concentrates on manipulation-prone facial regions (eye band, nose-cheek transitions, lip corners) rather than spurious background cues.
+
+See `06_evaluation.ipynb` and `experiments/results.csv` for full reproducible numbers.
 
 ---
 
@@ -121,14 +130,28 @@ deepfake-detection/
 ├── requirements.txt                   # Python dependencies
 ├── .gitignore                         # Excluded files (data, models, checkpoints)
 ├── configs/
-│   └── paths.py                       # Centralized path configuration
+│   ├── paths.py                       # Centralized path configuration
+│   └── experiments.py                 # Per-model hyperparameter configs
+├── src/                               # Reusable training + eval library
+│   ├── datasets.py                    # DeepfakeBinaryDataset + dataloader builders
+│   ├── models.py                      # 5 model classes (ResNet-18, EfficientNet-B4, R3D-18, ViT-B/16, R3D-18+RAFT)
+│   ├── preprocessing.py               # MTCNN face extraction + RAFT optical-flow interpolation
+│   ├── training.py                    # Single-stage and two-stage trainers, checkpoint I/O
+│   ├── evaluation.py                  # In/cross-dataset eval + per-manipulation breakdown
+│   ├── visualization.py               # Training curves, confusion matrices, ROC, Grad-CAM
+│   └── logging.py                     # Run-id generation + experiments/results.csv schema
 ├── notebooks/
-│   ├── 01_data_ingestion.ipynb        # Dataset discovery, indexing, splitting
+│   ├── 01_data_ingestion.ipynb        # Dataset discovery, indexing, identity-based splitting
 │   ├── 02_eda.ipynb                   # Exploratory data analysis
-│   ├── 03_preprocessing.ipynb         # Frame extraction, face detection, tensor prep
-│   ├── 04_model_baseline.ipynb        # ResNet-18 baseline model
-│   ├── 05_model_advanced.ipynb        # Advanced architectures (3D CNN, LSTM, ViT)
-│   └── 06_evaluation.ipynb            # Cross-dataset evaluation & comparison
+│   ├── 03_preprocessing.ipynb         # MTCNN face extraction (FF++ + Celeb-DF) + sanity viz
+│   ├── 04_model_baseline.ipynb        # ResNet-18 baseline (single-stage A2 recipe)
+│   ├── 05_model_advanced.ipynb        # 4 advanced architectures (two-stage warmup → fine-tune)
+│   └── 06_evaluation.ipynb            # Cross-dataset Celeb-DF eval + 5-model ensemble + Grad-CAM
+├── experiments/
+│   ├── results.csv                    # Single-source-of-truth leaderboard (28 cols, all runs)
+│   └── results/                       # Per-run JSON with full provenance
+├── tests/                             # pytest suite for src/ modules
 └── docs/
+    ├── design/                        # Architecture diagrams + paper sections
     └── references.md                  # Research papers and resources
 ```
