@@ -20,6 +20,37 @@ import torch.nn as nn
 import torchvision.models as tv_models
 
 
+def _dct_blockwise_magnitude(x: torch.Tensor, block: int = 8) -> torch.Tensor:
+    """Per-block 2D-FFT magnitude as an approximation of 2D-DCT magnitude.
+
+    Splits ``x`` into non-overlapping ``block × block`` tiles, computes the
+    2D-FFT of each tile, takes the absolute value (magnitude spectrum), and
+    reassembles into a tensor with the same shape as the input. This is a
+    fast PyTorch-native approximation of block-wise DCT-II magnitude — the
+    two transforms differ in phase but not in the magnitude spectrum that
+    GAN-fingerprint detectors care about.
+
+    Args:
+        x:     (B, C, H, W) float tensor. H and W must be divisible by ``block``.
+        block: tile size, default 8 (matches F3-Net / FreqNet conventions).
+    Returns:
+        Magnitude map with the same shape as ``x`` (non-negative).
+    """
+    B, C, H, W = x.shape
+    assert H % block == 0 and W % block == 0, (
+        f"DCT block {block} does not divide H={H} or W={W}"
+    )
+    # Reshape to (B, C, H/b, b, W/b, b) so the last two dims are the block
+    nh, nw = H // block, W // block
+    blocks = x.view(B, C, nh, block, nw, block).permute(0, 1, 2, 4, 3, 5)
+    # blocks: (B, C, nh, nw, block, block) — last two dims are the spatial axes per tile
+    spectrum = torch.fft.fft2(blocks)
+    magnitude = spectrum.abs()
+    # Reassemble back to (B, C, H, W) by inverting the permutation/view
+    out = magnitude.permute(0, 1, 2, 4, 3, 5).contiguous().view(B, C, H, W)
+    return out
+
+
 class DeepfakeClassifier(nn.Module, ABC):
     """Base class. Subclasses must implement forward and expose head/backbone parameter groups."""
 
