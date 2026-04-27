@@ -67,6 +67,10 @@ def main() -> None:
     test_dct_blockwise_magnitude()
     print("dct_blockwise_magnitude OK")
 
+    # --- FrequencyDeepfakeDetector ---
+    test_frequency_deepfake_detector()
+    print("FrequencyDeepfakeDetector OK")
+
     print("ok")
 
 
@@ -86,6 +90,37 @@ def test_dct_blockwise_magnitude():
     # The first DCT coefficient (top-left of each 8x8 block) carries most of the energy
     # for a constant input; this test just sanity-checks it's not zero everywhere
     assert mag_const.sum().item() > 0.0, "constant input should produce non-zero DCT magnitude"
+
+
+def test_frequency_deepfake_detector():
+    from src.models import FrequencyDeepfakeDetector, DeepfakeClassifier
+    import torch
+    device = torch.device("cpu")
+    model = FrequencyDeepfakeDetector().to(device).eval()
+    assert isinstance(model, DeepfakeClassifier), "must subclass DeepfakeClassifier"
+
+    # (batch=2, num_frames=4, C=3, H=224, W=224) — same shape contract as ResNet/EfficientNet
+    x = torch.randn(2, 4, 3, 224, 224, device=device)
+    with torch.no_grad():
+        logits = model(x)
+    assert logits.shape == (2, 2), f"expected (2, 2) logits, got {tuple(logits.shape)}"
+
+    # Param groups must partition all parameters
+    head_params = list(model.head_parameters())
+    backbone_params = list(model.backbone_parameters())
+    assert len(head_params) > 0
+    assert len(backbone_params) > 0
+    all_params = set(id(p) for p in model.parameters())
+    partitioned = set(id(p) for p in head_params) | set(id(p) for p in backbone_params)
+    assert all_params == partitioned, "head + backbone must partition all parameters"
+
+    # Backward pass works (gradient flows from loss to backbone)
+    model.train()
+    logits = model(x)
+    loss = logits.sum()
+    loss.backward()
+    has_grad = any(p.grad is not None and p.grad.abs().sum() > 0 for p in model.parameters())
+    assert has_grad, "no gradient flowed to any parameter"
 
 
 if __name__ == "__main__":
