@@ -20,15 +20,44 @@ import torch.nn as nn
 import torchvision.models as tv_models
 
 
-def _dct_blockwise_magnitude(x: torch.Tensor, block: int = 8) -> torch.Tensor:
-    """Per-block 2D-FFT magnitude as an approximation of 2D-DCT magnitude.
+def _dct_basis(N: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    """Build an N×N orthonormal DCT-II basis matrix D such that for an N×N tile X,
+    the 2D-DCT-II is ``D @ X @ D.T``. Used by ``_dct_blockwise_magnitude``.
 
-    Splits ``x`` into non-overlapping ``block × block`` tiles, computes the
-    2D-FFT of each tile, takes the absolute value (magnitude spectrum), and
-    reassembles into a tensor with the same shape as the input. This is a
-    fast PyTorch-native approximation of block-wise DCT-II magnitude — the
-    two transforms differ in phase but not in the magnitude spectrum that
-    GAN-fingerprint detectors care about.
+    Cached by (N, device, dtype) so the basis is computed once per training run.
+    """
+    key = (N, str(device), dtype)
+    cache = _dct_basis._cache
+    if key not in cache:
+        n = torch.arange(N, device=device, dtype=dtype)
+        k = torch.arange(N, device=device, dtype=dtype).unsqueeze(1)
+        D = torch.cos(torch.pi * (2.0 * n + 1.0) * k / (2.0 * N))
+        D = D * (2.0 / N) ** 0.5
+        D[0] = D[0] * (1.0 / 2.0) ** 0.5  # k=0 normalisation factor
+        cache[key] = D
+    return cache[key]
+
+
+_dct_basis._cache: dict = {}   # type: ignore[attr-defined]
+
+
+def _dct_blockwise_magnitude(x: torch.Tensor, block: int = 8) -> torch.Tensor:
+    """Per-block 2D-DCT-II magnitude.
+
+    Splits ``x`` into non-overlapping ``block × block`` tiles, applies the
+    orthonormal 2D-DCT-II per tile via ``D @ X @ D.T`` (real arithmetic only,
+    no FFT), takes ``abs()`` for safety, and reassembles into a tensor with
+    the same shape as the input. Magnitudes are non-negative.
+
+    DCT-II is the same transform JPEG and HEVC use to expose spectral
+    structure of natural images. F3-Net (Qian et al., ECCV 2020) and FreqNet
+    (Tan et al., AAAI 2024) both use 2D-DCT-II as the input to their
+    frequency-domain branches.
+
+    A previous version of this function used ``torch.fft.fft2`` as a faster
+    approximation, but PyTorch's MPS backend produces NaN gradients for
+    that op in some versions, breaking training on Apple Silicon. The matmul
+    formulation works on every backend.
 
     Args:
         x:     (B, C, H, W) float tensor. H and W must be divisible by ``block``.
@@ -40,14 +69,25 @@ def _dct_blockwise_magnitude(x: torch.Tensor, block: int = 8) -> torch.Tensor:
     assert H % block == 0 and W % block == 0, (
         f"DCT block {block} does not divide H={H} or W={W}"
     )
-    # Reshape to (B, C, H/b, b, W/b, b) so the last two dims are the block
+    # Reshape to (B, C, nh, nw, block, block) — last two dims are spatial axes per tile
     nh, nw = H // block, W // block
-    blocks = x.view(B, C, nh, block, nw, block).permute(0, 1, 2, 4, 3, 5)
-    # blocks: (B, C, nh, nw, block, block) — last two dims are the spatial axes per tile
-    spectrum = torch.fft.fft2(blocks)
-    magnitude = spectrum.abs()
-    # Reassemble back to (B, C, H, W) by inverting the permutation/view
-    out = magnitude.permute(0, 1, 2, 4, 3, 5).contiguous().view(B, C, H, W)
+    blocks = (
+        x.contiguous()
+        .view(B, C, nh, block, nw, block)
+        .permute(0, 1, 2, 4, 3, 5)
+        .contiguous()
+    )
+    # Apply 2D DCT-II per tile: dct = D @ X @ D.T  (broadcasts over leading dims)
+    D = _dct_basis(block, x.device, x.dtype)
+    dct = D @ blocks @ D.transpose(-2, -1)
+    magnitude = dct.abs()
+    # Reassemble back to (B, C, H, W)
+    out = (
+        magnitude
+        .permute(0, 1, 2, 4, 3, 5)
+        .contiguous()
+        .view(B, C, H, W)
+    )
     return out
 
 
