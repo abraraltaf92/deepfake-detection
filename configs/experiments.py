@@ -78,10 +78,23 @@ R3D18_RAFT_CONFIG = {
     "epochs_stage2": 10,
 }
 
+FREQUENCY_CNN_CONFIG = {
+    **BASE_CONFIG,
+    "model": "freq_cnn",
+    "train_mode": "single_stage",   # random init -> end-to-end from scratch (matches A2 baseline recipe)
+    "lr": 1e-3,
+    "weight_decay": 1e-4,
+    "epochs": 20,
+    "scheduler_patience": 2,
+    "scheduler_factor": 0.5,
+    "batch_size": 16,               # small model, fits comfortably
+}
+
 ALL_CONFIGS = {
     "resnet18":              RESNET18_CONFIG,
     "efficientnet_b4":       EFFICIENTNET_B4_CONFIG,
     "r3d18":                 R3D18_CONFIG,
     "vit_base_patch16_224":  VIT_CONFIG,
     "r3d18_raft":            R3D18_RAFT_CONFIG,
+    "freq_cnn":              FREQUENCY_CNN_CONFIG,
 }
