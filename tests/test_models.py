@@ -63,7 +63,29 @@ def main() -> None:
     logits = m(x)
     assert logits.shape == (2, 2)
 
+    # --- DCT blockwise magnitude ---
+    test_dct_blockwise_magnitude()
+    print("dct_blockwise_magnitude OK")
+
     print("ok")
+
+
+def test_dct_blockwise_magnitude():
+    from src.models import _dct_blockwise_magnitude
+    import torch
+    # Input: (B, C, H, W) — must be divisible by 8 for 8x8 block DCT
+    x = torch.randn(2, 3, 224, 224)
+    mag = _dct_blockwise_magnitude(x, block=8)
+    # Output should preserve shape (we return per-pixel magnitude after block DCT)
+    assert mag.shape == x.shape, f"expected {tuple(x.shape)} got {tuple(mag.shape)}"
+    # Magnitudes are non-negative
+    assert mag.min().item() >= 0.0, f"DCT magnitude must be non-negative, got min={mag.min().item()}"
+    # Constant input -> mostly DC component (low spatial frequency dominates)
+    x_const = torch.ones(1, 3, 224, 224) * 0.5
+    mag_const = _dct_blockwise_magnitude(x_const, block=8)
+    # The first DCT coefficient (top-left of each 8x8 block) carries most of the energy
+    # for a constant input; this test just sanity-checks it's not zero everywhere
+    assert mag_const.sum().item() > 0.0, "constant input should produce non-zero DCT magnitude"
 
 
 if __name__ == "__main__":
