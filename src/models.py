@@ -203,3 +203,69 @@ class R3D18RAFTDeepfakeDetector(R3D18DeepfakeDetector):
     configs.experiments entries can disambiguate.
     """
     pass
+
+
+class FrequencyDeepfakeDetector(DeepfakeClassifier):
+    """Frequency-domain deepfake detector — 6th member of the ensemble.
+
+    Operates on per-block 2D-DCT (FFT-magnitude approximation) of MTCNN-cropped
+    RGB frames. Motivated by F3-Net (Qian et al. 2020) and FreqNet (Tan et al.
+    2024): GAN/diffusion generators leave periodic high-frequency artifacts
+    that survive video compression, and these spectral signatures transfer
+    better across datasets than spatial textures.
+
+    Input:  (B, T, C=3, H, W) — same contract as ResNet18/EfficientNet/ViT
+    Output: (B, 2) binary logits.
+    """
+
+    def __init__(self, dropout: float = 0.3, dct_block: int = 8) -> None:
+        super().__init__()
+        self.dct_block = dct_block
+
+        # 4-conv CNN over DCT magnitudes — random init, no pretrained weights
+        # because frequency-domain features have no ImageNet equivalent.
+        self.backbone = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=7, stride=1, padding=3),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),                                       # 224 -> 112
+
+            nn.Conv2d(32, 64, kernel_size=5, stride=1, padding=2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),                                       # 112 -> 56
+
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),                                       # 56 -> 28
+
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool2d(1),                               # 28 -> 1
+            nn.Flatten(),                                          # (B*T, 256)
+        )
+
+        self.head = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(256, 2),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, T, C, H, W) RGB, normalised by ImageNet mean/std (same as 2D models)
+        B, T, C, H, W = x.shape
+        x = x.view(B * T, C, H, W)
+
+        # DCT magnitudes per frame — non-negative, same shape as input
+        x = _dct_blockwise_magnitude(x, block=self.dct_block)
+
+        feats = self.backbone(x)                                   # (B*T, 256)
+        feats = feats.view(B, T, -1).mean(dim=1)                   # (B, 256) — temporal mean-pool BEFORE head
+        return self.head(feats)                                    # (B, 2)
+
+    def head_parameters(self) -> list[nn.Parameter]:
+        return list(self.head.parameters())
+
+    def backbone_parameters(self) -> list[nn.Parameter]:
+        return list(self.backbone.parameters())
