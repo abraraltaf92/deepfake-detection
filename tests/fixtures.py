@@ -13,7 +13,7 @@ import pandas as pd
 from PIL import Image
 
 
-FAKE_CLASSES = ["Deepfakes", "Face2Face", "FaceSwap", "NeuralTextures"]
+FAKE_CLASSES = ["Deepfakes", "Face2Face", "FaceSwap", "NeuralTextures", "FaceShifter"]
 
 
 def make_tiny_split_df(n_real: int = 4, n_fake: int = 4) -> pd.DataFrame:

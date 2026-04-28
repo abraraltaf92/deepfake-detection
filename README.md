@@ -39,6 +39,7 @@ Five complementary detectors targeting three anomaly classes (spatial, global-co
 | 04-22-2026 | EfficientNet-B4, R3D-18, ViT-B/16 trained on FF++ C23 | ✅ Done |
 | 04-23-2026 | RAFT optical-flow extraction + R3D-18+RAFT trained | ✅ Done |
 | 04-24-2026 | Cross-dataset Celeb-DF v2 zero-shot eval + 5-model ensemble + Grad-CAM | ✅ Done |
+| 04-28-2026 | Frequency-domain detector experiment (block-wise 2D-DCT CNN) — negative result | ✅ Done |
 
 ---
 
@@ -76,6 +77,26 @@ All 5 architectures saturate FF++ test (AUC ≥ 0.999). In-dataset metrics do no
 - **Grad-CAM** on EfficientNet-B4's final convolutional stage confirms attention concentrates on manipulation-prone facial regions (eye band, nose-cheek transitions, lip corners) rather than spurious background cues.
 
 See `06_evaluation.ipynb` and `experiments/results.csv` for full reproducible numbers.
+
+### Negative Result — Frequency-Domain Detector
+
+We tested whether a frequency-domain detector operating on block-wise 2D-DCT magnitudes would transfer better across datasets than spatial detectors. Hypothesis: GAN/VAE forgeries leave characteristic high-frequency footprints that should be invariant to dataset-specific RGB statistics.
+
+**Result: hypothesis rejected.**
+
+| Configuration | FF++ AUC | Celeb-DF AUC | Δ Gap | Δ vs 5-model baseline |
+|---|---:|---:|---:|---:|
+| FrequencyDeepfakeDetector (standalone) | 0.9817 | 0.6913 | **0.2905** | — |
+| 6-model ensemble (with freq_cnn) | 1.0000 | 0.8935 | 0.1065 | **−0.0121 worse** |
+| 5-model ensemble (without freq_cnn) | 1.0000 | 0.9056 | 0.0944 | baseline |
+
+The randomly-initialized 480K-parameter CNN had the **largest** generalization gap of any model in the study and *hurt* the ensemble (Celeb-DF AUC dropped from 0.9056 → 0.8935 when freq_cnn was added).
+
+**Mechanism analysis.** Every other model in the ensemble carried a transferable inductive bias from pretraining (ImageNet for 2D, Kinetics-400 for 3D). The frequency-domain detector started from random initialization and had to learn from FF++ alone. What it learned was the **codec signature** (H.264 CRF=23 8×8 DCT block-quantization patterns) rather than the **forgery signature** (generation-process artifacts). When the codec changed (Celeb-DF uses different encoders), the model collapsed.
+
+**Implication for future work.** Frequency-domain methods for cross-dataset deepfake detection require either (a) pretrained backbones operating on frequency representations, or (b) explicit codec-invariance regularization during training. Random-init small CNNs on DCT inputs are insufficient.
+
+See `docs/design/specs/2026-04-27-frequency-domain-detector-design.md` for the full hypothesis and experimental design, and `notebooks/05_model_advanced.ipynb` (frequency CNN cell) + `notebooks/06_evaluation.ipynb` for the data.
 
 ---
 

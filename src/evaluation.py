@@ -87,7 +87,23 @@ def per_manipulation_breakdown(
 
     `df` must match the order of y_pred / y_probs — i.e. it's the test DataFrame
     that produced those predictions.
+
+    Note on identical AUCs across manipulations:
+        If a model assigns the SAME confidence distribution to every fake class
+        (no per-class variation), all per-manip AUCs will be mathematically
+        identical to the overall AUC. This is correct behavior, not a bug —
+        it indicates the model doesn't discriminate between manipulation types.
+
+    Returns dict mapping manipulation name → {auc, f1, n_videos, n_fakes,
+    mean_prob_real, mean_prob_fake}. Manipulations with zero rows in `df` are
+    skipped entirely (not returned with auc=None).
     """
+    if len(y_pred) != len(df):
+        raise ValueError(
+            f"length mismatch: len(df)={len(df)} but len(y_pred)={len(y_pred)}. "
+            "df must match the rows that produced y_pred / y_probs."
+        )
+
     df = df.reset_index(drop=True).copy()
     df["_pred"]  = y_pred
     df["_probs"] = y_probs
@@ -96,6 +112,11 @@ def per_manipulation_breakdown(
     real_mask = df["source_class"] == "original"
     for manip in fake_classes:
         manip_mask = df["source_class"] == manip
+        # Skip if this manipulation has zero rows — returning an entry with
+        # auc=None just because reals exist would be misleading.
+        n_fakes = int(manip_mask.sum())
+        if n_fakes == 0:
+            continue
         subset = df[real_mask | manip_mask]
         if subset.empty:
             continue
@@ -106,10 +127,17 @@ def per_manipulation_breakdown(
             auc = float(roc_auc_score(y_true, y_s)) if len(set(y_true)) > 1 else None
         except ValueError:
             auc = None
+        # Mean probability per ground-truth label inside the subset — surfaces
+        # WHY two manips may produce identical AUCs (same per-class confidence).
+        real_subset = subset[subset["binary_target"] == 0]
+        fake_subset = subset[subset["binary_target"] == 1]
         out[manip] = {
-            "auc": auc,
-            "f1":  float(f1_score(y_true, y_p, zero_division=0)),
-            "n_videos": int(len(subset)),
+            "auc":            auc,
+            "f1":             float(f1_score(y_true, y_p, zero_division=0)),
+            "n_videos":       int(len(subset)),
+            "n_fakes":        n_fakes,
+            "mean_prob_real": float(real_subset["_probs"].mean()) if len(real_subset) else None,
+            "mean_prob_fake": float(fake_subset["_probs"].mean()) if len(fake_subset) else None,
         }
     return out
 
