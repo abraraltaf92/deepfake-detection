@@ -53,6 +53,11 @@ EXPERIMENTS_ROOT   = REPO_ROOT / "experiments"
 RESULTS_CSV        = EXPERIMENTS_ROOT / "results.csv"
 RESULTS_JSON_DIR   = EXPERIMENTS_ROOT / "results"
 
+# --- EDA plot outputs (gitignored — large PNGs at 150 dpi) ---
+# Numbered convention: 01_class_distribution.png, 02_binary_distribution.png, ...
+# so the final report can reference them by stable filename.
+PLOTS_DIR = REPO_ROOT / "eda_plots"
+
 # --- Training Logs (gitignored) ---
 LOG_ROOT = REPO_ROOT / "logs"
 
