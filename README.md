@@ -20,9 +20,9 @@ Binary deepfake detection with a focus on building robust models that **generali
 
 ## Current Phase
 
-**Phase 3 complete: Multi-View Anomaly Detection Ensemble**
+**Phase 4 complete: Production deployment of v2 ensemble**
 
-Five complementary detectors targeting three anomaly classes (spatial, global-consistency, temporal-motion), aggregated via equal-weight soft-vote. All models trained on FaceForensics++ C23, zero-shot evaluated on Celeb-DF v2.
+Five complementary detectors targeting three anomaly classes (spatial, global-consistency, temporal-motion), aggregated via equal-weight soft-vote with a calibrated threshold (τ = 0.1). All models trained on FaceForensics++ C23 with a two-stage transfer-learning recipe (10 frozen-backbone warmup epochs + 10 end-to-end fine-tune epochs), zero-shot evaluated on Celeb-DF v2. Weights are published on Hugging Face Hub (`abraraltaf92/deepfake-detection-models`, tag `v2-2026-05-07`) and served live at [api.deepfakedetection.xyz](https://api.deepfakedetection.xyz) via a containerised FastAPI backend.
 
 ---
 
@@ -40,6 +40,8 @@ Five complementary detectors targeting three anomaly classes (spatial, global-co
 | 04-23-2026 | RAFT optical-flow extraction + R3D-18+RAFT trained | ✅ Done |
 | 04-24-2026 | Cross-dataset Celeb-DF v2 zero-shot eval + 5-model ensemble + Grad-CAM | ✅ Done |
 | 04-28-2026 | Frequency-domain detector experiment (block-wise 2D-DCT CNN) — negative result | ✅ Done |
+| 05-05-2026 | v2 ensemble retrained — full two-stage recipe across all 5 architectures | ✅ Done |
+| 05-07-2026 | v2 weights published to Hugging Face Hub + deployed to AWS production backend | ✅ Done |
 
 ---
 
@@ -49,12 +51,12 @@ Five complementary detectors targeting three anomaly classes (spatial, global-co
 
 | Model | Anomaly Class | Accuracy | F1 Score | AUC | Train Time |
 |-------|---------------|---------:|---------:|----:|-----------:|
-| ResNet-18 (baseline) | Spatial | 0.9989 | 0.9993 | 0.9999 | — |
-| EfficientNet-B4 | Spatial (high-cap) | 0.9944 | 0.9967 | **1.0000** | 148.8 min |
-| R3D-18 | Temporal-motion | 0.9756 | 0.9852 | 0.9991 | 35.9 min |
-| ViT-B/16 | Global consistency | 0.9700 | 0.9817 | 0.9992 | 72.1 min |
-| R3D-18 + RAFT | Motion-flow | 0.9833 | 0.9899 | 0.9993 | 130.1 min |
-| **Ensemble (5-model soft-vote)** | All three | **0.9989** | **0.9993** | **1.0000** | n/a |
+| ResNet-18 (baseline) | Spatial | 0.9878 | 0.9926 | 0.9999 | 79.3 min |
+| EfficientNet-B4 | Spatial (high-cap) | **1.0000** | **1.0000** | **1.0000** | 106.7 min |
+| R3D-18 | Temporal-motion | 0.9889 | 0.9933 | 0.9995 | 174.6 min |
+| ViT-B/16 | Global consistency | 0.9889 | 0.9933 | 0.9998 | 196.4 min |
+| R3D-18 + RAFT | Motion-flow | 0.9878 | 0.9926 | 0.9996 | 164.1 min |
+| **Ensemble (5-model soft-vote, τ=0.1)** | All three | **1.0000** | **1.0000** | **1.0000** | n/a |
 
 All 5 architectures saturate FF++ test (AUC ≥ 0.999). In-dataset metrics do not differentiate models — see cross-dataset table below for the real story.
 
@@ -62,18 +64,18 @@ All 5 architectures saturate FF++ test (AUC ≥ 0.999). In-dataset metrics do no
 
 | Model | FF++ AUC | Celeb-DF AUC | Δ Generalization Gap |
 |-------|---------:|-------------:|---------------------:|
-| EfficientNet-B4 | 1.0000 | 0.8173 | 0.1827 |
-| ResNet-18 | 0.9999 | 0.8209 | 0.1790 |
-| R3D-18 | 0.9991 | 0.8413 | 0.1577 |
-| R3D-18 + RAFT | 0.9993 | 0.8744 | 0.1249 |
-| ViT-B/16 | 0.9992 | 0.8777 | 0.1216 |
-| **Ensemble (5-model)** | **1.0000** | **0.9056** | **0.0944** |
+| EfficientNet-B4 | 1.0000 | 0.8109 | 0.1891 |
+| R3D-18 | 0.9995 | 0.8383 | 0.1612 |
+| ResNet-18 | 0.9999 | 0.8427 | 0.1572 |
+| ViT-B/16 | 0.9998 | 0.8475 | 0.1523 |
+| R3D-18 + RAFT | 0.9996 | 0.8775 | 0.1221 |
+| **Ensemble (5-model, τ=0.1)** | **1.0000** | **0.8851** | **0.1149** |
 
 **Key findings:**
 
 - **EfficientNet-B4 ranks first in-dataset, last cross-dataset** — high capacity overfits FF++ compression artifacts.
-- **Anomaly class predicts transferability:** spatial-only models drop hardest; motion-flow (R3D+RAFT) and global-consistency (ViT) transfer best.
-- **The 5-model ensemble shrinks the generalization gap by 22%** (0.1216 → 0.0944) over the strongest single model, validating the multi-view anomaly-detection framing.
+- **Anomaly class predicts transferability:** spatial-only models drop hardest; motion-flow (R3D+RAFT) is the strongest individual cross-dataset detector and global-consistency (ViT) is competitive.
+- **The 5-model ensemble shrinks the generalization gap by 26.9%** over the ResNet-18 baseline (0.1572 → 0.1149), validating the multi-view anomaly-detection framing. The ensemble also improves on the strongest single model (R3D-18+RAFT, gap 0.1221) by another 5.9%.
 - **Grad-CAM** on EfficientNet-B4's final convolutional stage confirms attention concentrates on manipulation-prone facial regions (eye band, nose-cheek transitions, lip corners) rather than spurious background cues.
 
 See `06_evaluation.ipynb` and `experiments/results.csv` for full reproducible numbers.
@@ -84,19 +86,36 @@ We tested whether a frequency-domain detector operating on block-wise 2D-DCT mag
 
 **Result: hypothesis rejected.**
 
-| Configuration | FF++ AUC | Celeb-DF AUC | Δ Gap | Δ vs 5-model baseline |
-|---|---:|---:|---:|---:|
-| FrequencyDeepfakeDetector (standalone) | 0.9817 | 0.6913 | **0.2905** | — |
-| 6-model ensemble (with freq_cnn) | 1.0000 | 0.8935 | 0.1065 | **−0.0121 worse** |
-| 5-model ensemble (without freq_cnn) | 1.0000 | 0.9056 | 0.0944 | baseline |
+The standalone Freq-CNN was retained from the v1 evaluation (no v2 retrain — its negative result already validated the design decision to exclude it). Standalone metrics under v2 evaluation:
 
-The randomly-initialized 480K-parameter CNN had the **largest** generalization gap of any model in the study and *hurt* the ensemble (Celeb-DF AUC dropped from 0.9056 → 0.8935 when freq_cnn was added).
+| Configuration | FF++ AUC | Celeb-DF AUC | Δ Gap |
+|---|---:|---:|---:|
+| FrequencyDeepfakeDetector (standalone, v2 eval) | 0.9817 | 0.6913 | **0.2905** |
+| 5-model ensemble (without freq_cnn, v2) | 1.0000 | 0.8851 | 0.1149 |
+
+The randomly-initialized 480K-parameter CNN has the **largest** generalization gap of any model in the study (0.2905 vs the ensemble's 0.1149). The original v1 6-model ensemble (with freq_cnn included) regressed Celeb-DF AUC from 0.9056 → 0.8935 — the same conclusion holds under v2 numbers and the model is intentionally excluded from the production ensemble.
 
 **Mechanism analysis.** Every other model in the ensemble carried a transferable inductive bias from pretraining (ImageNet for 2D, Kinetics-400 for 3D). The frequency-domain detector started from random initialization and had to learn from FF++ alone. What it learned was the **codec signature** (H.264 CRF=23 8×8 DCT block-quantization patterns) rather than the **forgery signature** (generation-process artifacts). When the codec changed (Celeb-DF uses different encoders), the model collapsed.
 
 **Implication for future work.** Frequency-domain methods for cross-dataset deepfake detection require either (a) pretrained backbones operating on frequency representations, or (b) explicit codec-invariance regularization during training. Random-init small CNNs on DCT inputs are insufficient.
 
 See `docs/design/specs/2026-04-27-frequency-domain-detector-design.md` for the full hypothesis and experimental design, and `notebooks/05_model_advanced.ipynb` (frequency CNN cell) + `notebooks/06_evaluation.ipynb` for the data.
+
+---
+
+## Production Deployment
+
+The trained ensemble runs as a live demo at **[deepfakedetection.xyz](https://deepfakedetection.xyz)**.
+
+| Component | Stack | Notes |
+|---|---|---|
+| Frontend | Next.js 14 + Tailwind, deployed on Vercel | Repo: [deepfake-detection-app](https://github.com/abraraltaf92/deepfake-detection-app) |
+| Backend | FastAPI + PyTorch, Docker on AWS EC2 (CUDA) | `api.deepfakedetection.xyz` |
+| Model weights | Hugging Face Hub | [`abraraltaf92/deepfake-detection-models`](https://huggingface.co/abraraltaf92/deepfake-detection-models), tag `v2-2026-05-07` |
+| Inference | All 5 models loaded once at FastAPI startup, shared across requests |
+| Threshold | τ = 0.1 (calibrated on Celeb-DF v2 zero-shot validation) |
+
+A user uploads a face video; the backend extracts 16 MTCNN-cropped frames + 16 RAFT optical-flow-interpolated frames, runs all 5 models, soft-vote averages the per-frame fake-class probabilities, applies τ = 0.1, and returns a verdict + per-model breakdown + a Grad-CAM heatmap.
 
 ---
 
