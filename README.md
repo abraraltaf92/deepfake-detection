@@ -22,7 +22,7 @@ Binary deepfake detection with a focus on building robust models that **generali
 
 **Phase 4 complete: Production deployment of v2 ensemble**
 
-Five complementary detectors targeting three anomaly classes (spatial, global-consistency, temporal-motion), aggregated via equal-weight soft-vote with a calibrated threshold (τ = 0.1). All models trained on FaceForensics++ C23 with a two-stage transfer-learning recipe (10 frozen-backbone warmup epochs + 10 end-to-end fine-tune epochs), zero-shot evaluated on Celeb-DF v2. Weights are published on Hugging Face Hub (`abraraltaf92/deepfake-detection-models`, tag `v2-2026-05-07`) and served live at [api.deepfakedetection.xyz](https://api.deepfakedetection.xyz) via a containerised FastAPI backend.
+Five complementary detectors targeting three anomaly classes (spatial, global-consistency, temporal-motion), aggregated via equal-weight soft-vote with a calibrated threshold (τ = 0.15). All models trained on FaceForensics++ C23 with a two-stage transfer-learning recipe (10 frozen-backbone warmup epochs + 10 end-to-end fine-tune epochs), zero-shot evaluated on Celeb-DF v2. Weights are published on Hugging Face Hub (`abraraltaf92/deepfake-detection-models`, tag `v2-2026-05-07`) and served live at [api.deepfakedetection.xyz](https://api.deepfakedetection.xyz) via a containerised FastAPI backend.
 
 ---
 
@@ -56,7 +56,7 @@ Five complementary detectors targeting three anomaly classes (spatial, global-co
 | R3D-18 | Temporal-motion | 0.9889 | 0.9933 | 0.9995 | 174.6 min |
 | ViT-B/16 | Global consistency | 0.9889 | 0.9933 | 0.9998 | 196.4 min |
 | R3D-18 + RAFT | Motion-flow | 0.9878 | 0.9926 | 0.9996 | 164.1 min |
-| **Ensemble (5-model soft-vote, τ=0.1)** | All three | **1.0000** | **1.0000** | **1.0000** | n/a |
+| **Ensemble (5-model soft-vote, τ=0.15)** | All three | **1.0000** | **1.0000** | **1.0000** | n/a |
 
 All 5 architectures saturate FF++ test (AUC ≥ 0.999). In-dataset metrics do not differentiate models — see cross-dataset table below for the real story.
 
@@ -69,7 +69,7 @@ All 5 architectures saturate FF++ test (AUC ≥ 0.999). In-dataset metrics do no
 | ResNet-18 | 0.9999 | 0.8427 | 0.1572 |
 | ViT-B/16 | 0.9998 | 0.8475 | 0.1523 |
 | R3D-18 + RAFT | 0.9996 | 0.8775 | 0.1221 |
-| **Ensemble (5-model, τ=0.1)** | **1.0000** | **0.8851** | **0.1149** |
+| **Ensemble (5-model, τ=0.15)** | **1.0000** | **0.8851** | **0.1149** |
 
 **Key findings:**
 
@@ -113,9 +113,9 @@ The trained ensemble runs as a live demo at **[deepfakedetection.xyz](https://de
 | Backend | FastAPI + PyTorch, Docker on AWS EC2 (CUDA) | `api.deepfakedetection.xyz` |
 | Model weights | Hugging Face Hub | [`abraraltaf92/deepfake-detection-models`](https://huggingface.co/abraraltaf92/deepfake-detection-models), tag `v2-2026-05-07` |
 | Inference | All 5 models loaded once at FastAPI startup, shared across requests |
-| Threshold | τ = 0.1 (calibrated on Celeb-DF v2 zero-shot validation) |
+| Threshold | τ = 0.15 (calibrated on Celeb-DF v2 zero-shot validation) |
 
-A user uploads a face video; the backend extracts 16 MTCNN-cropped frames + 16 RAFT optical-flow-interpolated frames, runs all 5 models, soft-vote averages the per-frame fake-class probabilities, applies τ = 0.1, and returns a verdict + per-model breakdown + a Grad-CAM heatmap.
+A user uploads a face video; the backend extracts 16 MTCNN-cropped frames + 16 RAFT optical-flow-interpolated frames, runs all 5 models, soft-vote averages the per-frame fake-class probabilities, applies τ = 0.15, and returns a verdict + per-model breakdown + a Grad-CAM heatmap.
 
 ---
 
